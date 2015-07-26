@@ -1,0 +1,159 @@
+%\VignetteIndexEntry{Introduction to the rstpm2 Package}
+%\VignetteDepends{rstpm2}
+%\VignetteKeyword{survival, spline}
+%\VignettePackage{rstpm2}
+%!\SweaveUTF8
+
+\documentclass[nojss]{jss}
+
+\usepackage{amsmath,amsfonts,enumitem}
+\usepackage[utf8]{inputenc}
+
+\title{Introduction to the \pkg{rstpm2} package}
+
+\author{Mark~Clements\\Karolinska Institutet}
+
+\Plainauthor{Mark~Clements}
+
+\Plaintitle{Introduction to the rstpm2 package}
+
+\Abstract{
+  
+  This vignette outlines the methods and provides some examples for
+  link-based survival models as implemented in the \proglang{R}
+  \pkg{rstpm2} package.
+
+}
+
+\Keywords{survival, splines}
+
+\Plainkeywords{survival, splines}
+
+\Address{Mark~Clements\\
+  Department of Medical Epidemiology and Biostatistics\\
+  Karolinska Institutet\\
+  Email: \email{mark.clements@ki.se}
+  }
+
+\begin{document}
+
+\section{Theory}
+
+Currently, the best description of the theory is in draft paper by Liu, Pawitan and Clements. 
+
+
+\section{Mean survival}
+
+This has a useful interpretation for causal inference.
+
+$E_Z(S(t|Z,X=1))-E_Z(S(t|Z,X=0))$
+
+\begin{verbatim}
+fit <- rstpm()
+predict(fit,type="meansurvdiff",newdata=data)
+\end{verbatim}
+
+\section{Cure models}
+
+For cure, we use the melanoma dataset used by Andersson and colleagues
+for cure models with Stata's stpm2 (see
+\url{http://www.pauldickman.com/survival/}).
+
+Initially, we merge the patient data with the all cause mortality rates.
+
+<<echo=FALSE,results=hide>>=
+options(width=80,useFancyQuotes="UTF-8")
+require(rstpm2)
+@ 
+<<>>=
+data(popmort, package="rstpm2")
+data(colon,package="rstpm2")
+popmort2 <- transform(popmort,exitage=age,exityear=year,age=NULL,year=NULL)
+colon2 <- within(colon, {
+  status <- ifelse(surv_mm>120.5,1,status)
+  tm <- pmin(surv_mm,120.5)/12
+  exit <- dx+tm*365.25
+  sex <- as.numeric(sex)
+  exitage <- pmin(floor(age+tm),99)
+  exityear <- floor(yydx+tm)
+  ##year8594 <- (year8594=="Diagnosed 85-94")
+})
+colon2 <- merge(colon2,popmort2)
+@ 
+For comparisons, we fit the relative survival model without and with cure. 
+%% <<results=hide>>=
+<<>>=
+fit0 <- stpm2(Surv(tm,status %in% 2:3)~I(year8594=="Diagnosed 85-94"),
+              data=colon2,
+              bhazard=colon2$rate, df=5)
+@ 
+<<>>=
+summary(fit <- stpm2(Surv(tm,status %in% 2:3)~I(year8594=="Diagnosed 85-94"),
+                     data=colon2,
+                     bhazard=colon2$rate,
+                     df=5,cure=TRUE))
+predict(fit,head(colon2),se.fit=TRUE)
+@ 
+The estimate for the year parameter from the model without cure is within three significant
+figures with that in Stata. For the predictions, the Stata model gives:
+\begin{verbatim}
+     +---------------------------------+
+     |      surv   surv_lci   surv_uci |
+     |---------------------------------|
+  1. | .86108264   .8542898   .8675839 |
+  2. | .79346526   .7850106   .8016309 |
+  3. | .69674037   .6863196   .7068927 |
+  4. | .86108264   .8542898   .8675839 |
+  5. | .82212425   .8143227   .8296332 |
+     |---------------------------------|
+  6. | .86108264   .8542898   .8675839 |
+     +---------------------------------+
+\end{verbatim}
+We can estimate the proportion of failures at the end of follow-up using:
+<<>>=
+newdata.eof <- data.frame(year8594 = unique(colon2$year8594),
+                          tm=max(colon2$tm)) 
+1-predict(fit0, newdata.eof, type="surv", se.fit=TRUE)
+1-predict(fit, newdata.eof, type="surv", se.fit=TRUE)
+@ 
+We can plot the predicted survival estimates:
+\begin{center}
+<<fig=TRUE>>=
+plot(fit0,newdata=data.frame(year8594 = "Diagnosed 85-94"), ylim=0:1,
+     xlab="Time since diagnosis (years)", ylab="Relative survival")
+plot(fit0,newdata=data.frame(year8594 = "Diagnosed 75-84"),
+     add=TRUE,line.col="red",rug=FALSE)
+plot(fit,newdata=data.frame(year8594 = "Diagnosed 85-94"),
+     add=TRUE,ci=FALSE,lty=2,rug=FALSE)
+plot(fit,newdata=data.frame(year8594="Diagnosed 75-84"),
+     add=TRUE,rug=FALSE,line.col="red",ci=FALSE,lty=2)
+legend("topright",c("85-94 without cure","75-84 without cure",
+                    "85-94 with cure","75-84 with cure"),
+       col=c(1,2,1,2), lty=c(1,1,2,2), bty="n")
+@
+\end{center}
+
+And the hazard curves:
+
+\begin{center}
+<<fig=TRUE>>=
+plot(fit0,newdata=data.frame(year8594 = "Diagnosed 85-94"), 
+     ylim=c(0,0.5), type="hazard",
+     xlab="Time since diagnosis (years)",ylab="Excess hazard")
+plot(fit0,newdata=data.frame(year8594 = "Diagnosed 75-84"),
+     type="hazard",
+     add=TRUE,line.col="red",rug=FALSE)
+plot(fit,newdata=data.frame(year8594 = "Diagnosed 85-94"),
+     type="hazard",
+     add=TRUE,ci=FALSE,lty=2,rug=FALSE)
+plot(fit,newdata=data.frame(year8594="Diagnosed 75-84"),
+     type="hazard",
+     add=TRUE,rug=FALSE,line.col="red",ci=FALSE,lty=2)
+legend("topright",c("85-94 without cure","75-84 without cure",
+                    "85-94 with cure","75-84 with cure"),
+       col=c(1,2,1,2), lty=c(1,1,2,2), bty="n")
+@
+\end{center}
+
+\end{document}
+
