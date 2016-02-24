@@ -2,14 +2,14 @@
 ### Encoding: UTF-8
 
 ###################################################
-### code chunk number 1: Introduction.Rnw:64-66
+### code chunk number 1: Introduction.Rnw:75-77
 ###################################################
 options(width=80,useFancyQuotes="UTF-8")
 require(rstpm2)
 
 
 ###################################################
-### code chunk number 2: Introduction.Rnw:68-81
+### code chunk number 2: Introduction.Rnw:79-92
 ###################################################
 data(popmort, package="rstpm2")
 data(colon,package="rstpm2")
@@ -27,7 +27,7 @@ colon2 <- merge(colon2,popmort2)
 
 
 ###################################################
-### code chunk number 3: Introduction.Rnw:85-88
+### code chunk number 3: Introduction.Rnw:96-99
 ###################################################
 fit0 <- stpm2(Surv(tm,status %in% 2:3)~I(year8594=="Diagnosed 85-94"),
               data=colon2,
@@ -35,7 +35,7 @@ fit0 <- stpm2(Surv(tm,status %in% 2:3)~I(year8594=="Diagnosed 85-94"),
 
 
 ###################################################
-### code chunk number 4: Introduction.Rnw:90-95
+### code chunk number 4: Introduction.Rnw:101-106
 ###################################################
 summary(fit <- stpm2(Surv(tm,status %in% 2:3)~I(year8594=="Diagnosed 85-94"),
                      data=colon2,
@@ -45,7 +45,7 @@ predict(fit,head(colon2),se.fit=TRUE)
 
 
 ###################################################
-### code chunk number 5: Introduction.Rnw:113-117
+### code chunk number 5: Introduction.Rnw:124-128
 ###################################################
 newdata.eof <- data.frame(year8594 = unique(colon2$year8594),
                           tm=max(colon2$tm)) 
@@ -54,7 +54,7 @@ newdata.eof <- data.frame(year8594 = unique(colon2$year8594),
 
 
 ###################################################
-### code chunk number 6: Introduction.Rnw:121-132
+### code chunk number 6: Introduction.Rnw:132-143
 ###################################################
 plot(fit0,newdata=data.frame(year8594 = "Diagnosed 85-94"), ylim=0:1,
      xlab="Time since diagnosis (years)", ylab="Relative survival")
@@ -70,7 +70,7 @@ legend("topright",c("85-94 without cure","75-84 without cure",
 
 
 ###################################################
-### code chunk number 7: Introduction.Rnw:139-154
+### code chunk number 7: Introduction.Rnw:150-165
 ###################################################
 plot(fit0,newdata=data.frame(year8594 = "Diagnosed 85-94"), 
      ylim=c(0,0.5), type="hazard",

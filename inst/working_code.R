@@ -18,6 +18,24 @@
 ##   require(bbmle)
 ## }
 
+
+require(abind)
+X <- matrix(seq(0,1,length=5*10),nrow=10)
+beta <- seq(0,1,length=5)
+H <- exp(as.vector(X %*% beta))
+dHdbeta <- X * H # row=indiv, col=beta
+
+d2Hdbeta2 <- aperm(abind(lapply(1:ncol(X), function(k) X[,k] * X * H),along=3),c(2,3,1))
+abind(lapply(1:nrow(X), function(i) (X[i,] %*% t(X[i,])) * H[i]),along=3) -
+    aperm(abind(lapply(1:ncol(X), function(k) X[,k] * X * H),along=3),c(2,3,1))
+
+numder <- function(f,x,eps=1e-8) (f(x+eps)-f(x-eps))/2/eps
+expit <- function(x) 1/(1+exp(-x))
+numder(expit,2)
+expit(2)*expit(-2)
+numder(dnorm,2)
+-dnorm(2)*2
+
 refresh
 require(rstpm2)
 data(brcancer)
@@ -27,7 +45,7 @@ data(brcancer)
 ## PO:     -.474102
 ## Probit: -.2823338
 system.time(print( stpm2(Surv(rectime,censrec==1)~hormon,data=brcancer)))
-system.time(print(pstpm2(Surv(rectime,censrec==1)~hormon,data=brcancer)))
+system.time(print(pfit <- pstpm2(Surv(rectime,censrec==1)~hormon,data=brcancer)))
 ##
 system.time(print( stpm2(Surv(rectime,censrec==1)~hormon,data=brcancer,type="PO")))
 system.time(print(pstpm2(Surv(rectime,censrec==1)~hormon,data=brcancer,type="PO")))
@@ -35,13 +53,23 @@ system.time(print(pstpm2(Surv(rectime,censrec==1)~hormon,data=brcancer,type="PO"
 system.time(print( stpm2(Surv(rectime,censrec==1)~hormon,data=brcancer,type="probit")))
 system.time(print(pstpm2(Surv(rectime,censrec==1)~hormon,data=brcancer,type="probit"))) # slow
 
+if (FALSE) {
+    debug(pstpm2)
+    pfit <- pstpm2(Surv(rectime,censrec==1)~hormon,data=brcancer,sp=1)
+    ## towards the end of the pstpm2 function...
+    sum(diag(solve(optimHess(coef(mle2),negllsp,sp=1)) %*% optimHess(coef(mle2),negll0sp,sp=1)))
+    sum(diag(solve(optimHess(coef(mle2),negllsp,sp=fit$sp)) %*% optimHess(coef(mle2),negll0sp,sp=fit$sp)))
+    negllsp(coef(mle2),sp=1)
+    negll0sp(coef(mle2),sp=1)
+}
+
 ## delayed entry
 ## Stata estimated coef for hormon (PH): -1.162504
 data(brcancer)
 brcancer2 <- transform(brcancer,startTime=ifelse(hormon==0,rectime*0.5,0))
 ## debug(stpm2)
-stpm2(Surv(startTime,rectime,censrec==1)~hormon,data=brcancer2,
-      logH.formula=~nsx(log(rectime),df=3,stata=TRUE))
+summary(fit <- stpm2(Surv(startTime,rectime,censrec==1)~hormon,data=brcancer2,
+      logH.formula=~nsx(log(rectime),df=3,stata=TRUE)))
 head(predict(fit,se.fit=TRUE))
 ## delayed entry and tvc
 summary(fit <- stpm2(Surv(startTime,rectime,censrec==1)~hormon,data=brcancer2,
@@ -49,6 +77,68 @@ summary(fit <- stpm2(Surv(startTime,rectime,censrec==1)~hormon,data=brcancer2,
                      tvc.formula=~hormon:nsx(rectime,df=3,stata=TRUE)))
 head(predict(fit,se.fit=TRUE)) 
 pstpm2(Surv(startTime,rectime,censrec==1)~hormon,data=brcancer2)
+
+## additive model
+summary(fit <- stpm2(Surv(startTime,rectime,censrec==1)~hormon,data=brcancer2,
+                     logH.formula=~nsx(rectime,df=3),
+                     tvc.formula=~hormon:nsx(rectime,df=3,stata=TRUE)))
+
+require(rstpm2)
+require(frailtypack)
+data(dataAdditive)
+system.time(mod2n <- pstpm2(Surv(t1,t2,event)~var1,
+                           data=dataAdditive,
+                           RandDist="LogN",
+                           smooth.formula=~s(t2),
+                           cluster=dataAdditive$group, nodes=20))
+
+system.time(mod2nb <- stpm2(Surv(t1,t2,event)~var1,
+                           data=dataAdditive,
+                           RandDist="LogN",
+                           logH.formula=~ns(t2,df=7),
+                           cluster=dataAdditive$group, nodes=20))
+
+mod1 <- frailtyPenal(Surv(t1,t2,event)~cluster(group)+var1,data=dataAdditive,
+                     n.knots=8,kappa1=0.1,cross.validation=TRUE)
+mod1n <- frailtyPenal(Surv(t1,t2,event)~cluster(group)+var1,data=dataAdditive,
+                     n.knots=8,kappa1=0.1,cross.validation=TRUE, RandDist="LogN")
+
+system.time(mod2 <- stpm2(Surv(t1,t2,event)~var1, # Gamma
+                          data=dataAdditive,
+                          logH.formula=~ns(t2,df=7),
+                          cluster=dataAdditive$group))
+
+system.time(coxph1 <- coxph(Surv(t1,t2,event)~var1+frailty(group,distribution="gaussian"),
+                          data=dataAdditive))
+summary(coxph1)
+
+system.time(mod2n <- stpm2(Surv(t1,t2,event)~var1,
+                           data=dataAdditive,
+                           RandDist="LogN",
+                           optimiser="NelderMead",
+                           logH.formula=~ns(t2,df=7),
+                           cluster=dataAdditive$group, nodes=20))
+system.time(mod2nb <- stpm2(Surv(t1,t2,event)~var1,
+                           data=dataAdditive,
+                           RandDist="LogN",
+                           logH.formula=~ns(t2,df=7),
+                           cluster=dataAdditive$group, nodes=20))
+
+system.time(mod3 <- pstpm2(Surv(t1,t2,event)~var1,
+                           data=dataAdditive,
+                           RandDist="LogN",
+                           criterion="BIC",
+                           smooth.formula=~s(t2),
+                           cluster=dataAdditive$group, nodes=20))
+
+system.time(mod3 <- coxph(Surv(t1,t2,event)~frailty(group,distribution="gamma")+var1,data=dataAdditive))
+summary(mod2)
+coef2 <- coef(summary(mod2))
+theta <- exp(coef2[nrow(coef2),1])
+se.logtheta <- coef2[nrow(coef2),2]
+se.theta <- theta*se.logtheta
+test.statistic <- 1/se.logtheta
+pchisq(test.statistic,df=1,lower.tail=FALSE)/2
 
 refresh
 require(rstpm2)
@@ -158,11 +248,11 @@ brcancer$recyear <- brcancer$rectime/365
 system.time(fit0 <- stpm2(Surv(recyear,censrec==1)~hormon,data=brcancer,df=5))
 system.time(pfit0 <- pstpm2(Surv(recyear,censrec==1)~hormon,data=brcancer,sp.init=1))
 system.time(pfit0.1 <- pstpm2(Surv(recyear,censrec==1)~hormon,data=brcancer,
-                logH.formula=~s(log(recyear),k=15),sp.init=10,alpha=2))
+                smooth.formula=~s(log(recyear),k=15),sp.init=10,alpha=2))
 system.time(pfit1.1 <- pstpm2(Surv(recyear,censrec==1)~hormon,data=brcancer,
-                logH.formula=~s(log(recyear)),sp.init=10,criterion="BIC"))
+                smooth.formula=~s(log(recyear)),sp.init=10,criterion="BIC"))
 system.time(pfit2 <- pstpm2(Surv(recyear,censrec==1)~hormon,data=brcancer,
-                logH.formula=~s(recyear),sp.init=10))
+                smooth.formula=~s(recyear),sp.init=10))
 
 
 plot(pfit0,newdata=data.frame(hormon=1),line.col="red",type="hazard")
@@ -1171,8 +1261,28 @@ summary(fit <- stpm2(Surv(startTime,rectime,censrec==1)~hormon,data=subset(brcan
 summary(fit <- stpm2(Surv(startTime,rectime,censrec==1)~hormon,data=subset(brcancer3,rectime>10),df=3))
 
 ## check the performance time
-brcancer10 = do.call("rbind",lapply(1:100,function(i) brcancer))
+refresh
+require(rstpm2)
+data(brcancer)
+brcancer10 = do.call("rbind",lapply(1:10,function(i) brcancer))
 system.time(summary(fit <- stpm2(Surv(rectime,censrec==1)~hormon,df=3,data=brcancer10)))
+system.time(summary(fit <- stpm2(Surv(rectime,censrec==1)~hormon,df=3,data=brcancer10)))
+system.time(summary(fit <- stpm2(Surv(rectime,censrec==1)~hormon,data=brcancer10, logH.formula=~ns(log(rectime),df=4)+hormon:ns(log(rectime),df=3))))
+system.time(summary(fit <- pstpm2(Surv(rectime,censrec==1)~hormon,data=brcancer10)))
+system.time(summary(fit <- pstpm2(Surv(rectime,censrec==1)~1,data=brcancer10, smooth.formula=~s(log(rectime))+s(log(rectime),by=hormon))))
+
+fit <- pstpm2(Surv(rectime,censrec==1)~hormon,data=brcancer10,trace=1)
+
+fit <- pstpm2(Surv(rectime,censrec==1)~1,data=brcancer10, smooth.formula=~s(log(rectime))+s(log(rectime),by=hormon),trace=1,sp.init=c(1,1), reltol=list(outer=1e-5,search=1e-10,final=1e-10))
+
+system.time(summary(fit <- pstpm2(Surv(rectime,censrec==1)~1,data=brcancer10, 
+                                  smooth.formula=~s(log(rectime))+s(log(rectime),by=hormon),
+                                  sp=c(0.006,0.0031),trace=1,outer_optim=2,criterion="GCV",
+                                  reltol=list(outer=1e-5,search=1e-10,final=1e-10))))
+## > fit@sp
+## [1] 0.06104312 0.31430954
+
+system.time(fit <- pstpm2(Surv(rectime,censrec==1)~1,data=brcancer10, smooth.formula=~s(log(rectime))+s(log(rectime),by=hormon),sp=c(1,1)))
 
 
 nsx(1:10,df=3) - ns(1:10,df=3)

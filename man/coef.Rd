@@ -1,33 +1,55 @@
 \name{coef<-}
 \alias{coef<-}
-\alias{coef<-.default}
-\title{Set Model Coefficients}
+%- Also NEED an '\alias' for EACH other topic documented here.
+\title{
+Generic method to update the coef in an object.
+}
 \description{
-  \code{coef<-} is a generic function which sets the model coefficients
-  for an object returned by modelling functions.
+Generic method to update the coef in an object.
 }
 \usage{
 coef(x) <- value
 }
+%- maybe also 'usage' for other objects documented here.
 \arguments{
-  \item{x}{an \R object.}
-  \item{value}{values of the coefficients.}
+  \item{x}{
+object to be updated
 }
-\value{
-  The updated object.
+  \item{value}{
+value of the coefficient to be updated.
+}
 }
 \details{
-  \code{coef<-} is a generic replacement function.  The default method sets
-  the \code{"coefficients"} components of a list.
+This simple generic method is used for the numerical delta method.
+}
+\value{
+The updated object is returned.
+}
+%\references{
+%% ~put references to the literature/web site here ~
+%}
+%\author{
+%%  ~~who you are~~
+%}
+%\note{
+%%  ~~further notes~~
+%}
 
+%% ~Make other sections like Warning with \section{Warning }{....} ~
+
+%\seealso{
+%% ~~objects to See Also as \code{\link{help}}, ~~~
+%}
+\examples{
+##---- Should be DIRECTLY executable !! ----
+##-- ==>  Define data, use random,
+##--	or do  help(data=index)  for the standard data sets.
+
+## The function is currently defined as
+function (x, value) 
+UseMethod("coef<-")
 }
-%% \note{
-%% }
-\seealso{
-  \code{\link{coef}}.
-}
-%% \references{
-%% }
-%% \examples{
-%% }
-% \keyword{attribute}
+% Add one or more standard keywords, see file 'KEYWORDS' in the
+% R documentation directory.
+\keyword{ ~kwd1 }
+\keyword{ ~kwd2 }% __ONLY ONE__ keyword per line

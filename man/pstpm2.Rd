@@ -3,27 +3,36 @@
 \alias{pstpm2}
 %- Also NEED an '\alias' for EACH other topic documented here.
 \title{
-Flexible semi-parametric survival model.
+Penalised generalised survival model
 }
 \description{
-This implements a penalised Royston-Parmar model using generalized
-additive models.
+  This implements the generalised survival model g(S(t|x)) = eta, where
+g is a link function, S is survival, t is time, x are covariates and eta
+is a linear predictor. The linear predictor can include penalised
+smoothers for the time effects, for time:covariate interactions and for
+covariate effects using the mgcv smoothers. The main model assumption is that the time
+effects in the linear predictor are smooth. This extends the class of
+flexible parametric survival models developed by Royston and
+colleagues. The model has been extended to include relative survival,
+Gamma frailties and normal random effects.
 }
 \usage{
-pstpm2(formula, data, smooth.formula = NULL,
+pstpm2(formula, data, smooth.formula = NULL, smooth.args = NULL,
        logH.args = NULL, 
        tvc = NULL, 
-       control = list(parscale = 0.1, maxit = 300), init = NULL,
+       control = list(parscale = 1, maxit = 300), init = NULL,
        coxph.strata = NULL, coxph.formula = NULL,
        weights = NULL, robust = FALSE, 
        bhazard = NULL, timeVar = "", time0Var = "",
-       sp=NULL, use.gr = TRUE, use.rcpp = TRUE,
+       sp=NULL, use.gr = TRUE, 
        criterion=c("GCV","BIC"), penalty = c("logH","h"),
        smoother.parameters = NULL,
        alpha=if (is.null(sp)) switch(criterion,GCV=1,BIC=1) else 1,
-       sp.init=NULL, trace = 0,
-       type=c("PH","PO","probit","AH"),
-       reltol = list(search = 1.0e-6, final = 1.0e-8),
+       sp.init=1, trace = 0,
+       link.type=c("PH","PO","probit","AH"), 
+       frailty=!is.null(cluster),cluster = NULL, logtheta=-6, nodes=9,
+       RandDist=c("Gamma","LogN"),
+       reltol = list(search = 1.0e-10, final = 1.0e-10, outer=1.0e-4),outer_optim=1,
        contrasts = NULL, subset = NULL, ...)
 }
 %- maybe also 'usage' for other objects documented here.
@@ -38,14 +47,18 @@ a data.frame in which to interpret the variables named in
 the \code{formula} argument.
 }
   \item{smooth.formula}{
-a \code{mgcv::gam} formula for describing the baseline log-cumulative
-hazard function, time.varying effects and smoothed covariate effects
+a \code{mgcv::gam} formula for describing the time effects and
+time-dependent effects and smoothed covariate effects on the linear
+predictor scale
 (default=NULL). The default model is equal to \code{~s(log(time),k=-1)}
 where \code{time} is the time variable.
 }
-  \item{logH.args}{
+  \item{smooth.args}{
 a list describing the arguments for the \code{s} function for modelling
-the baseline log-cumulative hazard (default=NULL). 
+the baseline time effect on the linear predictor scale (default=NULL). 
+}
+  \item{logH.args}{
+as per \code{smooth.args}. Deprecated.
 }
   \item{tvc}{
 a list with the names of the time-varying coefficients
@@ -69,7 +82,6 @@ two variables define the time}
 % determined from the survival object, however this may be ambiguous if
 % two variables define the entry time}
 \item{sp}{fix the value of the smoothing parameters.}
-\item{use.rcpp}{Boolean for whether to use Rcpp for the optimisation rather than R.}
 \item{use.gr}{in R, a Boolean to determine whether to use the gradient in the optimisation}
 \item{criterion}{in Rcpp, determine whether to use "GCV" or "BIC" for for the smoothing parameter selection.}
 \item{penalty}{use either the "logH" penalty, which is the default penalty from mgcv, or the "h" hazard penalty.}
@@ -77,7 +89,6 @@ two variables define the time}
 \item{alpha}{an ad hoc tuning parameter for the smoothing parameter.}
 \item{sp.init}{initial values for the smoothing parameters.}
 \item{trace}{integer for trace reporting; 0 represents no additional reporting.}
-\item{reltol}{list with components for search and final relative tolerances.}
 \item{contrasts}{an optional list. See the \code{contrasts.arg}
     of \code{\link{model.matrix.default}}.
 }
@@ -86,16 +97,26 @@ two variables define the time}
   initial values [optional and rarely used].}
 \item{time0Var}{string variable to determine the entry variable; useful
   for when more than one data variable is used in the entry time.}
-\item{type}{type of link function.}
+\item{reltol}{list with components for search and final relative tolerances.}
+\item{link.type}{type of link function.}
+\item{frailty}{logical for whether to fit a shared frailty model}
+\item{cluster}{string for the data variable that determines the cluster
+  for the frailty}
+\item{nodes}{number of integration points for Gaussian quadrature}
+\item{RandDist}{type of distribution for the random effect or frailty}
+\item{logtheta}{initial value for log-theta used in the gamma shared frailty
+  model}
+\item{outer_optim}{Integer to indicate the algorithm for outer optimisation. If outer_optim=1, then use Neldear-Mead, otherwise use Nlm.}
 \item{\dots}{
   additional arguments to be passed to the \code{\link{mle2}} .
 }
 }
 \details{
   
-  
   The implementation extends the \code{mle2} object from the
   \code{bbmle} package.
+
+  The default smoother for time on the linear predictor scale is s(log(time)).
 }
 \value{
 A \code{pstpm2-class} object. 

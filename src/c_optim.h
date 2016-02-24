@@ -8,10 +8,10 @@ namespace rstpm2 {
   typedef double optimfn(int, double *, void *);
   typedef void optimgr(int, double *, double *, void *);
 
-  /* type of pointer to the target and gradient functions  for Nlm */
+  /* type of pointer to the target and gradient functions for Nlm */
   typedef void (*fcn_p)(int, double *, double *, void *);
 
-  /* type of pointer to the hessian functions */
+  /* type of pointer to the hessian functions for Nlm */
   typedef void (*d2fcn_p)(int, int, double *, double *, void *);
 
   double min(double a, double b);
@@ -28,22 +28,22 @@ namespace rstpm2 {
     return model->operator()(x);
   }
   /**
-     Adapt an negll function for NelderMead and BFGS
+     Adapt an objective function for NelderMead and BFGS
   **/
   template<class T>
-    double adapt_negll(int n, double * beta, void * par) {
+    double adapt_objective(int n, double * beta, void * par) {
     T * model = (T *) par;
     Rcpp::NumericVector x(beta,beta+n);
-    return model->negll(x);
+    return model->objective(x);
   }
   /**
-     Adapt a grad_negll function for BFGS
+     Adapt a gradient function for BFGS
   **/
   template<class T>
-    void adapt_grad_negll(int n, double * beta, double * grad, void * par) {
+    void adapt_gradient(int n, double * beta, double * grad, void * par) {
     T * model = (T *) par;
     Rcpp::NumericVector x(beta,beta+n);
-    //grad = model->grad_negll(x);
+    grad = model->gradient(x);
   }
 
   class NelderMead {
@@ -56,7 +56,7 @@ namespace rstpm2 {
     virtual void optim(optimfn fn, Rcpp::NumericVector init, void * ex);
     template<class T>
       void optim(Rcpp::NumericVector init, T object) {
-      optim(&adapt_functor<T>,init,(void *) &object);
+      optim(&adapt_objective<T>,init,(void *) &object);
     }
     virtual Rcpp::NumericMatrix calc_hessian(optimfn fn, void * ex);
     int n, trace, maxit, fail, fncount;
@@ -72,6 +72,7 @@ namespace rstpm2 {
 	 double abstol = - INFINITY,
 	 double reltol = 1.0e-8, int report = 10, double epshess = 1.0e-8, bool hessianp = true);
     virtual void optim(optimfn fn, optimgr gr, Rcpp::NumericVector init, void * ex);
+    virtual void optim(int n, optimfn fn, optimgr gr, double * init, void * ex);
     virtual double calc_objective(optimfn fn, Rcpp::NumericVector coef, void * ex);
     virtual double calc_objective(optimfn fn, void * ex);
     virtual Rcpp::NumericMatrix calc_hessian(optimgr gr, void * ex);
@@ -96,11 +97,12 @@ namespace rstpm2 {
 	double gradtl = 1.0e-6, // nlm()
 	double stepmx = 0.0,    // set to -1.0 to get nlm()'s behaviour
 	double steptl = 1.0e-6,  // nlm()
+  double epshess = 6.055454e-06,
 	int itrmcd = 0, 
 	int itncnt = 0,
-	bool hessianp = true
-	);
-    void optim(fcn_p fcn, fcn_p d1fcn, Rcpp::NumericVector init, void * state); // assumes iahflg=0
+	bool hessianp = true);
+    void optim(fcn_p fcn, fcn_p d1fcn, Rcpp::NumericVector init, void * state);
+    void optim(fcn_p fcn, Rcpp::NumericVector init, void * state);
     double calc_objective(fcn_p fn, Rcpp::NumericVector coef, void * ex);
     double calc_objective(fcn_p fn, void * ex);
     Rcpp::NumericMatrix calc_hessian(fcn_p gr, void * ex);
@@ -117,6 +119,7 @@ namespace rstpm2 {
     double gradtl;
     double stepmx;
     double steptl;
+    double epshess;
     int itrmcd;
     int itncnt;
     bool hessianp;

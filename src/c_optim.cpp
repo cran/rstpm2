@@ -15,6 +15,20 @@ namespace rstpm2 {
   double max(double a, double b) { return a < b ? b : a; }
   double bound(double x, double lower, double upper) { return x < lower ? lower : (x > upper ? upper : x); }
 
+  // print utilities
+  void Rprint_(NumericMatrix m) {
+    for (int i=0; i<m.nrow(); ++i) {
+      for (int j=0; j<m.ncol(); ++j) 
+	Rprintf("%f ", m(i,j));
+      Rprintf("\n");
+    }
+  }
+  void Rprint_(NumericVector v) {
+    for (int i=0; i<v.size(); ++i) 
+      Rprintf("%f ", v(i));
+    Rprintf("\n");
+  }
+
   // void nmmin(int n, double *Bvec, double *X, double *Fmin, optimfn fminfn,
   // 	   int *fail, double abstol, double intol, void *ex,
   // 	   double alpha, double bet, double gamm, int trace,
@@ -44,7 +58,7 @@ namespace rstpm2 {
       f0 = fn(n,&coef[0],ex);
       for(int i=0; i<n; ++i) {
 	tmpi = coef[i];
-	hi = epshess*(1.0+abs(tmpi));
+	hi = epshess*(1.0+std::abs(tmpi));
 	coef[i] = tmpi + hi;
 	f1=fn(n, &coef[0], ex);
 	coef[i] = tmpi - hi;
@@ -55,7 +69,7 @@ namespace rstpm2 {
 	for (int j=i; j<n; ++j) {
 	  if (i != j) {
 	    tmpj = coef[j];
-	    hj = epshess*(1.0+abs(tmpj));
+	    hj = epshess*(1.0+std::abs(tmpj));
 	    coef[i] = tmpi + hi;
 	    coef[j] = tmpj + hj;
 	    fij=fn(n, &coef[0], ex);
@@ -87,14 +101,23 @@ namespace rstpm2 {
 	     double reltol, int report, double epshess, bool hessianp) : 
     trace(trace), maxit(maxit), report(report), abstol(abstol), reltol(reltol), epshess(epshess), hessianp(hessianp) { }
   void BFGS::optim(optimfn fn, optimgr gr, NumericVector init, void * ex) {
-      n = init.size();
-      std::vector<int> mask(n,1); 
-      vmmin(n, &init[0], &Fmin, fn, gr, maxit, trace, &mask[0], abstol, reltol, report,
-	    ex, &fncount, &grcount, &fail);
-      coef = clone(init);
-      if (hessianp)
-	hessian = calc_hessian(gr, ex);
-    }
+    n = init.size();
+    std::vector<int> mask(n,1); 
+    vmmin(n, &init[0], &Fmin, fn, gr, maxit, trace, &mask[0], abstol, reltol, report,
+	  ex, &fncount, &grcount, &fail);
+    coef = clone(init);
+    if (hessianp)
+      hessian = calc_hessian(gr, ex);
+  }
+  void BFGS::optim(int n, optimfn fn, optimgr gr, double *initptr, void * ex) {
+    std::vector<int> mask(n,1); 
+    vmmin(n, initptr, &Fmin, fn, gr, maxit, trace, &mask[0], abstol, reltol, report,
+	  ex, &fncount, &grcount, &fail);
+    coef = NumericVector(n);
+    for (int i=0; i<n; ++i) coef[i] = initptr[i];
+    if (hessianp)
+      hessian = calc_hessian(gr, ex);
+  }
   double BFGS::calc_objective(optimfn fn, NumericVector coef, void * ex) {
       return fn(coef.size(), &coef[0], ex);
     }
@@ -103,13 +126,13 @@ namespace rstpm2 {
     }
   NumericMatrix BFGS::calc_hessian(optimgr gr, void * ex) {
       int n = coef.size();
-      NumericVector df1(clone(coef));
-      NumericVector df2(clone(coef));
+      NumericVector df1(n);
+      NumericVector df2(n);
       NumericMatrix hess(n,n);
       double tmp;
       for(int i=0; i<n; ++i) {
 	tmp = coef[i];
-	coef[i] += epshess;
+	coef[i] = tmp + epshess;
 	gr(n, &coef[0], &df1[0], ex);
 	coef[i] = tmp - epshess;
 	gr(n, &coef[0], &df2[0], ex);
@@ -122,7 +145,7 @@ namespace rstpm2 {
 	for(int j=i; j<n; ++j) 
 	  if (i != j)
 	    hess(i,j) = hess(j,i) = (hess(i,j) + hess(j,i)) / 2.0;
-      return wrap(hess);
+      return wrap(hess); // wrap()?
     }
 
 
@@ -145,13 +168,15 @@ namespace rstpm2 {
 	   double gradtl, // cf. epshess
 	   double stepmx,
 	   double steptl,
+     double epshess,
 	   int itrmcd,
 	   int itncnt,
 	   bool hessianp
 	   ) : fscale(fscale), method(method), iexp(iexp), msg(msg),
 	       ndigit(ndigit), itnlim(itnlim), iagflg(iagflg), 
 	       iahflg(iahflg), dlt(dlt), gradtl(gradtl), stepmx(stepmx),
-	       steptl(steptl), itrmcd(itrmcd), itncnt(itncnt), hessianp(hessianp) { }
+	       steptl(steptl), epshess(epshess),
+         itrmcd(itrmcd), itncnt(itncnt), hessianp(hessianp) { }
   void Nlm::optim(fcn_p fcn, fcn_p d1fcn, NumericVector init, void * state) {
       int n;
       n = init.size();
@@ -166,6 +191,7 @@ namespace rstpm2 {
 	norm = sqrt(norm);
 	stepmx = norm < 1.0 ? 1000.0 : norm*1000.0;
       }
+      iagflg = 1; iahflg = 0;
       // call the optimizer
       optif9(n, n, &init[0], fcn, d1fcn, (d2fcn_p) 0, state, &typsize[0], fscale, method, 
 	     iexp, &msg, ndigit, itnlim, iagflg, iahflg,
@@ -175,6 +201,31 @@ namespace rstpm2 {
       coef = clone(xpls);
       if (hessianp)
 	hessian = calc_hessian(d1fcn, state);
+    }
+  void Nlm::optim(fcn_p fcn, NumericVector init, void * state) {
+      int n;
+      n = init.size();
+      std::vector<double> typsize(n,1.0), gpls(n,0.0), a(n*n,0.0), wrk(n*8,0.0);
+      double norm, fpls;
+      NumericVector xpls(n);
+      // stepmax calculations
+      if (stepmx == -1.0) {
+  norm = 0.0;
+	for (int i=0; i<n; ++i)
+	  norm += init[i]*init[i]/typsize[i]/typsize[i];
+	norm = sqrt(norm);
+	stepmx = norm < 1.0 ? 1000.0 : norm*1000.0;
+      }
+      iagflg = iahflg = 0;
+      // call the optimizer
+      optif9(n, n, &init[0], fcn, (fcn_p) 0, (d2fcn_p) 0, state, &typsize[0], fscale, method, 
+	     iexp, &msg, ndigit, itnlim, iagflg, iahflg,
+	     dlt, gradtl, stepmx, steptl,
+	     &xpls[0], &fpls, &gpls[0], &itrmcd, &a[0],
+	     &wrk[0], &itncnt);
+      coef = clone(xpls);
+      //if (hessianp)
+	//hessian = calc_hessian(d1fcn, state);
     }
   double Nlm::calc_objective(fcn_p fn, NumericVector coef, void * ex) {
     double f;
