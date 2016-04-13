@@ -1,8 +1,8 @@
-d31e4a698a5c385113890dae39f16b3b *DESCRIPTION
+3e7fe71965531b50906b04b94bdd4c2c *DESCRIPTION
 3a275a39c6d10e73c5a3bdd143568c07 *NAMESPACE
-fcf5937e189bee4e9788fab1cc483af9 *R/pm2-3.R
+688f2cf0ad693858ff8dbaebf850edf1 *R/pm2-3.R
 b05130e451d2b655adbca443a271672d *README.md
-1863e39597f4da46acba3e77c31afd47 *build/vignette.rds
+4c207de5e0c76551c2d5a1bee3248e6e *build/vignette.rds
 8bdf762dc2ca2044f04dba37bef92a8c *data/brcancer.rda
 b229556b6ba0687cf0bdd24c57f36b48 *data/colon.rda
 a3e2d667791996e0c9356735415f65e5 *data/legendre.quadrature.rule.200.rda
@@ -29,7 +29,7 @@ b9ab5aaad7bf1723d5fdb2ce75f84993 *man/legendre.quadrature.rule.200.Rd
 1e24630860531910c83f95f16f5e4b26 *man/numDeltaMethod.Rd
 8ebb635d700eb03966e9e8f656386fa1 *man/plot-methods.Rd
 b46a3500a9b89f0c4c017d3085847cc2 *man/popmort.Rd
-a1c9e092e8fc1be105515198546773d7 *man/predict-methods.Rd
+0f807d4619f02955dcd37106b26ab47e *man/predict-methods.Rd
 ae9b9caf21242ff15e697ea3780010da *man/predict.nsx.Rd
 1482d9ffb64d3cacb7db33c2e2da2a3c *man/predictnl-methods.Rd
 3ab06ce38a878c10668d964f3a804cde *man/predictnl.Rd
@@ -42,7 +42,7 @@ f0bf6f7aa5c225c3ceaa1996bc3eb188 *man/stpm2-class.Rd
 2a6f9e9e044a78154d3cfda5936d6f48 *src/Makevars
 e512099947474353a7893f840a92d9b3 *src/c_optim.cpp
 5efa7ffd3420f4640d021c86688a034d *src/c_optim.h
-a1b398cc835795a2b13fa0ddee52bfbd *src/test-nmmin.cpp
+b5f8aba20683a9549be1ddc7687af840 *src/test-nmmin.cpp
 c3690f8d4cefbadffc3f7d3ac5c75964 *vignettes/Introduction.Rnw
 c21235d186ac4b68f34b14d3c23560b2 *vignettes/Introduction.Rnw.tex
 71da65b879071e5396ae4f93f290589b *vignettes/_region_.tex
