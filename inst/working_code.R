@@ -18,6 +18,63 @@
 ##   require(bbmle)
 ## }
 
+# Aranda-Ordaz link
+refresh
+require(rstpm2)
+## PH
+summary(fit <- stpm2(Surv(rectime,censrec==1)~1,data=brcancer,link="PH", df=3))
+summary(fit <- stpm2(Surv(rectime,censrec==1)~1,data=brcancer,link="AO", df=3)) # Same: OK
+summary(fit <- stpm2(Surv(rectime,censrec==1)~1,data=brcancer,link="PO", df=3))
+summary(fit <- stpm2(Surv(rectime,censrec==1)~1,data=brcancer,link="AO", theta.AO=1, df=3)) # Same: OK
+summary(fit <- pstpm2(Surv(rectime,censrec==1)~1,data=brcancer,link="AO", theta.AO=0.5))
+
+## Examples using ns() for covariates - this was buggy.
+refresh
+require(rstpm2)
+summary(fit <- stpm2(Surv(rectime,censrec==1)~1,
+                     smooth.formula=~ns(log(rectime),df=3)+ns(x1,df=3),
+                     data=brcancer,link="PH"))
+summary(fit <- stpm2(Surv(rectime,censrec==1)~ns(x1,df=3), df=3,data=brcancer,link="PH"))
+summary(fit <- pstpm2(Surv(rectime,censrec==1)~ns(x1,df=3), data=brcancer,link="PH"))
+
+
+grad <- function(f,x,eps=1e-5)
+    sapply(1:length(x), function(i) {
+        lower <- upper <- x
+        upper[i] <- x[i]+eps
+        lower[i] <- x[i]-eps
+        (f(upper)-f(lower))/2/eps
+    })
+link <- function(S,theta=0.5) log((S^(-theta)-1)/theta)
+S <- ilink <- function(eta,theta=0.5) exp(-log(theta*exp(eta)+1)/theta)
+H <- function(eta,theta=0.5) -log(S(eta,theta))
+h <- function(eta,etaD,theta=0.5) exp(eta)*etaD/(theta*exp(eta)+1)
+gradH <- function(eta,X,theta=0.5) exp(eta)*X/(1+theta*exp(eta))
+gradh <- function(eta,etaD,X,XD,theta=0.5) {
+    eta <- as.vector(eta)
+    etaD <- as.vector(etaD)
+    ((theta*exp(2*eta)+exp(eta))*XD+exp(eta)*etaD*X) /
+        (theta*exp(eta)+1)^2
+}
+
+
+X <- cbind(1,1:2,1) # (constant, t, x)
+XD <- cbind(0,1:2,0)
+beta <- c(0.1, 0.2, 0.3)
+eta <- as.vector(X %*% beta)
+etaD <- as.vector(XD %*% beta)
+S(eta)
+H(eta)
+h(eta,etaD) - grad(function(t) H(cbind(1,t,1) %*% beta), 1) # OK
+gradH(eta,X) - grad(function(beta) H(X %*% beta), beta) # OK
+gradh(eta,etaD,X,XD)
+grad(function(beta) h(X %*% beta, XD %*% beta), beta)
+
+ilink(link(.1))
+link(ilink(.1))
+
+
+
 
 require(abind)
 X <- matrix(seq(0,1,length=5*10),nrow=10)
@@ -36,22 +93,70 @@ expit(2)*expit(-2)
 numder(dnorm,2)
 -dnorm(2)*2
 
+require(mgcv)
+d <- data.frame(x = seq(0,1,length=100), x2=rnorm(100), y = rnorm(100))
+fit <- gam(y~s(x)+s(x2,by=x), data=d)
+X <- predict(fit,d,type="lpmatrix")
+X0 <- predict(fit,transform(d,x=0),type="lpmatrix")
+Xstar <- X-X0
+index0 <- rstpm2:::which.dim(Xstar)
+lapply(fit$smooth, function(s) {
+    which((1:ncol(X) %in% index0)[s$first.para:s$last.para]) # index for S'
+})
+lapply(fit$smooth, function(s) {
+    range(which((1:ncol(X) %in% s$first.para:s$last.para)[index0]))
+})
+lapply(fit$smooth,"[[","S")
+## outline: given a full index=1:n, a reduced index set index0 and a smoother with first.para, last.para and a square matrix S, return a revised first.para', last.para' and matrix S'
+## For S': 
+
+
+
 refresh
 require(rstpm2)
-data(brcancer)
+## additive
+fit <- stpm2(Surv(rectime,censrec==1)~1,data=brcancer,link="AH",
+             smooth.formula=~ns(rectime,df=4)+hormon:ns(rectime,df=3), optimiser="NelderMead")
+summary(fit)
+fit2 <- stpm2(Surv(rectime,censrec==1)~1,data=brcancer,link="AH",
+             smooth.formula=~ns(rectime,df=4)+hormon:ns(rectime,df=3))
+summary(fit2)
+plot(fit2,newdata=data.frame(hormon=0),type="haz")
+plot(fit2,newdata=data.frame(hormon=1),add=TRUE,lty=2,type="haz")
+
+fit <- pstpm2(Surv(rectime,censrec==1)~1,data=brcancer,link="AH",
+             smooth.formula=~s(rectime)+s(rectime,by=hormon))
+plot(fit,newdata=data.frame(hormon=0),type="haz")
+plot(fit,newdata=data.frame(hormon=1),add=TRUE,lty=2,type="haz")
+
+
+## robust standard errors for clustered data
+refresh
+require(rstpm2)
+brcancer2 <- transform(brcancer,
+                       id=rep(1:(nrow(brcancer)/2),each=2))
+fit <- stpm2(Surv(rectime,censrec==1)~1,data=brcancer)
+summary(fit)
+fit <- stpm2(Surv(rectime,censrec==1)~1,data=brcancer, cluster=brcancer2$id, robust=TRUE)
+summary(fit)
+
+
+
 
 ## Stata estimated coef for hormon
 ## PH:     -.3614357
 ## PO:     -.474102
 ## Probit: -.2823338
-system.time(print( stpm2(Surv(rectime,censrec==1)~hormon,data=brcancer)))
-system.time(print(pfit <- pstpm2(Surv(rectime,censrec==1)~hormon,data=brcancer)))
+system.time(print( stpm2(Surv(rectime,censrec==1)~hormon,data=brcancer, stata=TRUE)))
+system.time(print(pfit <- pstpm2(Surv(rectime,censrec==1)~hormon,smooth.formula=~s(log(rectime))+s(x1),data=brcancer)))
 ##
 system.time(print( stpm2(Surv(rectime,censrec==1)~hormon,data=brcancer,type="PO")))
 system.time(print(pstpm2(Surv(rectime,censrec==1)~hormon,data=brcancer,type="PO")))
 ##
 system.time(print( stpm2(Surv(rectime,censrec==1)~hormon,data=brcancer,type="probit")))
 system.time(print(pstpm2(Surv(rectime,censrec==1)~hormon,data=brcancer,type="probit"))) # slow
+
+summary(fit <- stpm2(Surv(rectime,censrec==1)~hormon,data=brcancer,smooth.formula=~nsx(log(rectime), df=4, stata.stpm2.compatible = TRUE)))
 
 if (FALSE) {
     debug(pstpm2)
@@ -62,46 +167,293 @@ if (FALSE) {
     negllsp(coef(mle2),sp=1)
     negll0sp(coef(mle2),sp=1)
 }
+update.list <- function(list,...) {
+    args <- list(...)
+    for (name in names(args))
+        list[[name]] <- args[[name]]
+    list
+}
+
+## right censored
+## Stata estimated coef for hormon (PH): -.3614357
+refresh
+require(rstpm2)
+summary(fit <- stpm2(Surv(rectime,censrec==1)~hormon,data=brcancer,
+      smooth.formula=~nsx(log(rectime),df=3,stata=TRUE),trace=0))
+summary(fit <- stpm2(Surv(rectime,censrec==1)~hormon,data=brcancer,
+      smooth.formula=~nsx(log(rectime),df=3,stata=TRUE),trace=0,optimiser="NelderMead"))
+summary(fit2 <- pstpm2(Surv(rectime,censrec==1)~hormon,data=brcancer))
+summary(fit2 <- pstpm2(Surv(rectime,censrec==1)~hormon,data=brcancer,optimiser="NelderMead"))
 
 ## delayed entry
 ## Stata estimated coef for hormon (PH): -1.162504
-data(brcancer)
-brcancer2 <- transform(brcancer,startTime=ifelse(hormon==0,rectime*0.5,0))
-## debug(stpm2)
+refresh
+require(rstpm2)
+brcancer2 <- transform(brcancer,startTime=ifelse(hormon==0,rectime/2,0))
+## brcancer2 <- transform(brcancer,startTime=0.1)
+##debug(rstpm2:::meat.stpm2)
 summary(fit <- stpm2(Surv(startTime,rectime,censrec==1)~hormon,data=brcancer2,
-      logH.formula=~nsx(log(rectime),df=3,stata=TRUE)))
+      smooth.formula=~nsx(log(rectime),df=3,stata=TRUE)))
+summary(fit2 <- pstpm2(Surv(startTime,rectime,censrec==1)~hormon,data=brcancer2,optimiser="NelderMead")) # OK
+summary(fit2 <- pstpm2(Surv(startTime,rectime,censrec==1)~hormon,data=brcancer2,optimiser="BFGS",trace=0)) # OK!!
+plot(fit,newdata=data.frame(hormon=1))
+plot(fit2,newdata=data.frame(hormon=1),add=TRUE,lty=2)
+head(predict(fit)) # OK
 head(predict(fit,se.fit=TRUE))
-## delayed entry and tvc
+## delayed entry and tvc (problems?)
 summary(fit <- stpm2(Surv(startTime,rectime,censrec==1)~hormon,data=brcancer2,
                      logH.formula=~nsx(rectime,df=3),
                      tvc.formula=~hormon:nsx(rectime,df=3,stata=TRUE)))
 head(predict(fit,se.fit=TRUE)) 
 pstpm2(Surv(startTime,rectime,censrec==1)~hormon,data=brcancer2)
 
+## left truncated with clusters
+require(rstpm2)
+brcancer2 <- transform(brcancer,
+                       startTime=ifelse(hormon==0,rectime/2,0),
+                       id=rep(1:(nrow(brcancer)/2),each=2))
+##debug(stpm2)
+summary(fit <- stpm2(Surv(startTime,rectime,censrec==1)~hormon,data=brcancer2,
+                     cluster=brcancer2$id, optimiser="NelderMead",recurrent=TRUE,
+                     smooth.formula=~nsx(log(rectime),df=3,stata=TRUE)))
+summary(fit0 <- stpm2(Surv(startTime,rectime,censrec==1)~hormon,data=brcancer2,
+                     optimiser="NelderMead",
+                     smooth.formula=~nsx(log(rectime),df=3,stata=TRUE)))
+
+refresh
+
+require(foreign)
+require(rstpm2)
+stmixed <- read.dta("http://fmwww.bc.edu/repec/bocode/s/stmixed_example2.dta")
+stmixed2 <- transform(stmixed, start = ifelse(treat,stime/2,0))
+summary(stpm2(Surv(start,stime,event)~treat,data=stmixed2))
+summary(r2 <- stpm2(Surv(stime,event)~treat,data=stmixed2,cluster=stmixed$trial,RandDist="LogN"))
+
+summary(r2 <- pstpm2(Surv(stime,event)~treat,data=stmixed2,cluster=stmixed$trial,RandDist="LogN"))
+
+system.time(summary(r2 <- stpm2(Surv(stime,event)~treat+factor(trial),data=stmixed2,cluster=stmixed$trial,RandDist="LogN",Z=~treat-1)))
+system.time(summary(r2 <- pstpm2(Surv(stime,event)~treat+factor(trial),data=stmixed2,cluster=stmixed$trial,RandDist="LogN",Z=~treat-1)))
+
+
+summary(fit <- stpm2(Surv(start,stime,event)~treat,data=stmixed2,cluster=stmixed$trial,optimiser="NelderMead",recurrent=TRUE))
+summary(fit <- stpm2(Surv(start,stime,event)~treat,data=stmixed2,cluster=stmixed$trial,recurrent=TRUE))
+summary(fit <- stpm2(Surv(start,stime,event)~treat,data=stmixed2,cluster=stmixed$trial,RandDist="LogN",
+                   optimiser="NelderMead", recurrent=TRUE))
+summary(r2 <- stpm2(Surv(start,stime,event)~treat,data=stmixed2,cluster=stmixed$trial,RandDist="LogN",
+                    recurrent=TRUE))
+
+summary(fit <- stpm2(Surv(start,stime,event)~treat,data=stmixed2,cluster=stmixed$trial,optimiser="NelderMead"))
+summary(fit <- stpm2(Surv(start,stime,event)~treat,data=stmixed2,cluster=stmixed$trial))
+summary(fit <- stpm2(Surv(start,stime,event)~treat,data=stmixed2,cluster=stmixed$trial,RandDist="LogN",
+                   optimiser="NelderMead"))
+summary(r2 <- stpm2(Surv(start,stime,event)~treat,data=stmixed2,cluster=stmixed$trial,RandDist="LogN"))
+
+
+
+summary(r <- stpm2(Surv(start,stime,event)~treat,data=stmixed2))
+
+
+
+## check gradients
+args <- fit@args
+args$return_type <- "gradient"
+.Call("model_output", args, package="rstpm2")
+fdgrad <- function(obj,eps=1e-6) {
+    args <- obj@args
+    args$return_type <- "objective"
+    sapply(1:length(args$init), function(i) {
+        largs <- args
+        largs$init[i] <- args$init[i]+eps
+        f1 <- .Call("model_output", largs, package="rstpm2")
+        largs$init[i] <- args$init[i]-eps
+        f2 <- .Call("model_output", largs, package="rstpm2")
+        data.frame(f1,f2,gradient=(f1-f2)/2.0/eps)
+    })
+}
+fdgrad(fit,1e-3)
+
+
+
+require(rstpm2)
+require(mgcv)
+x=seq(0,1,length=5001)
+set.seed(12345)
+y=rnorm(length(x),sin(2*pi*x))
+i <- x>0.65
+d=data.frame(x=x[i],y=y[i])
+fit <- gam(y~s(x),data=d)
+## plot(fit)
+plot(x,predict(fit,newdata=data.frame(x=x)),type="l")
+plot(x,y)
+
+## weighted estimates
+refresh
+require(rstpm2)
+## unequal weights
+brcancer2 <- transform(brcancer,w=ifelse(hormon==0,10,1))
+## unweighted 
+summary(fit <- stpm2(Surv(rectime,censrec==1)~hormon,data=brcancer2,
+      smooth.formula=~nsx(log(rectime),df=3,stata=TRUE)))
+## weighted estimates
+## stpm2
+summary(stpm2(Surv(rectime,censrec==1)~hormon,data=brcancer2,weights=w,
+              smooth.formula=~nsx(log(rectime),df=3,stata=TRUE)))
+## stpm2 robust
+summary(stpm2(Surv(rectime,censrec==1)~hormon,data=brcancer2,weights=w,robust=TRUE,
+      smooth.formula=~nsx(log(rectime),df=3,stata=TRUE)))
+summary(pstpm2(Surv(rectime,censrec==1)~hormon,data=brcancer2))
+## pstpm2
+summary(pstpm2(Surv(rectime,censrec==1)~hormon,data=brcancer2,weights=w))
+summary(pstpm2(Surv(rectime,censrec==1)~hormon,data=brcancer2,weights=w,robust=TRUE))
+##
+## equal weights
+brcancer2 <- transform(brcancer,w=4)
+## unweighted
+summary(fit <- stpm2(Surv(rectime,censrec==1)~hormon,data=brcancer2,
+      smooth.formula=~nsx(log(rectime),df=3,stata=TRUE)))
+## weighted estimates
+## stpm2
+summary(stpm2(Surv(rectime,censrec==1)~hormon,data=brcancer2,weights=w,
+      smooth.formula=~nsx(log(rectime),df=3,stata=TRUE)))
+summary(stpm2(Surv(rectime,censrec==1)~hormon,data=brcancer2,weights=w,robust=TRUE,
+      smooth.formula=~nsx(log(rectime),df=3,stata=TRUE)))
+## pstpm2
+summary(pstpm2(Surv(rectime,censrec==1)~hormon,data=brcancer2))
+summary(pstpm2(Surv(rectime,censrec==1)~hormon,data=brcancer2,weights=w))
+summary(pstpm2(Surv(rectime,censrec==1)~hormon,data=brcancer2,weights=w,robust=TRUE))
+
+refresh
+require(rstpm2)
+brcancer2 <- transform(brcancer,w=ifelse(hormon==0,10,1))
+##debug(rstpm2:::meat.stpm2)
+summary(fit <- pstpm2(Surv(rectime,censrec==1)~hormon,data=brcancer2,weights=w,robust=TRUE,
+      smooth.formula=~nsx(log(rectime),df=3,stata=TRUE)))
+summary(fit <- stpm2(Surv(rectime,censrec==1)~hormon,data=brcancer2,
+      logH.formula=~nsx(log(rectime),df=3,stata=TRUE)))
+
+
+## code for the SAS PROC ICPHREG examples
+read.textConnection <- function(text, ...) {
+    conn <-  textConnection(text)
+    on.exit(close(conn))
+    read.table(conn, ...)
+}
+hiv <- read.textConnection("0 16 0 0 0 1
+15 26 0 0 0 1
+12 26 0 0 0 1
+17 26 0 0 0 1
+13 26 0 0 0 1
+0 24 0 0 1 0
+6 26 0 1 1 0
+0 15 0 1 1 0
+14 26 0 1 1 0
+12 26 0 1 1 0
+13 26 0 1 0 1
+12 26 0 1 1 0
+12 26 0 1 1 0
+0 18 0 1 0 1
+0 14 0 1 0 1
+0 17 0 1 1 0
+0 15 0 1 1 0
+3 26 1 0 0 1
+4 26 1 0 0 1
+1 11 1 0 0 1
+13 19 1 0 0 1
+0 6 1 0 0 1
+0 11 1 1 0 0
+6 26 1 1 0 0
+0 6 1 1 0 0
+2 12 1 1 0 0
+1 17 1 1 1 0
+0 14 1 1 0 0
+0 25 1 1 0 1
+2 11 1 1 0 0
+0 14 1 1 0 0")
+names(hiv) <- c("Left","Right","Stage","Dose","CdLow","CdHigh")
+##hiv <- transform(hiv, Left=pmax(1e-5,Left))
+hiv <- transform(hiv,Event = ifelse(Left==0,2,ifelse(Right>=26,0,3)))
+require(rstpm2)
+## stpm2(Surv(Left,Right,Event,type="interval")~Stage, data=hiv, df=2) # FAILS
+## survreg(Surv(Left, Right, Event, type = "interval")~Stage, data=hiv) # FAILS
+## require(rms)
+## psm(Surv(Left, Right, Event, type = "interval")~Stage, data=hiv) # FAILS
+
 ## additive model
 summary(fit <- stpm2(Surv(startTime,rectime,censrec==1)~hormon,data=brcancer2,
                      logH.formula=~nsx(rectime,df=3),
                      tvc.formula=~hormon:nsx(rectime,df=3,stata=TRUE)))
 
+require(foreign)
+require(rstpm2)
+stmixed <- read.dta("http://fmwww.bc.edu/repec/bocode/s/stmixed_example2.dta")
+system.time(r <- stpm2(Surv(stime,event)~treat,data=stmixed,cluster=stmixed$trial))
+system.time(r <- stpm2(Surv(stime,event)~treat,data=stmixed,cluster=stmixed$trial,RandDist="LogN",
+                       nodes=20))
+summary(r)
+
+require(mexhaz)
+system.time(mix <-
+                mexhaz(formula=Surv(stime,event)~treat, data=stmixed, base="exp.bs",degree=3,
+                       random="trial", verbose=0))
+
+## Frailty model
 require(rstpm2)
 require(frailtypack)
 data(dataAdditive)
+##debug(pstpm2)
 system.time(mod2n <- pstpm2(Surv(t1,t2,event)~var1,
                            data=dataAdditive,
                            RandDist="LogN",
-                           smooth.formula=~s(t2),
-                           cluster=dataAdditive$group, nodes=20))
+                           ##optimiser="NelderMead",
+                           smooth.formula=~s(log(t2)),
+                           sp.init=0.07723242,
+                           adaptive=TRUE,
+                           cluster=dataAdditive$group, nodes=10, trace=0))
+summary(mod2n)
+
+localargs <- mod2n@args
+localargs$init <- mod2n@args$init*1.1
+localargs$adaptive=TRUE
+localargs$return_type <- "gradient"
+.Call("model_output", localargs, package="rstpm2")
+fdgrad <- function(obj,eps=1e-6) {
+    args <- obj@args
+    args$init <- args$init*1.1
+    sapply(1:length(args$init), function(i) {
+        args$return_type <- "objective"
+        args$init[i] <- args$init[i]+eps
+        f1 <- .Call("model_output", args, package="rstpm2")
+        args$init[i] <- args$init[i]-2*eps
+        f2 <- .Call("model_output", args, package="rstpm2")
+        (f1-f2)/2/eps
+    })
+}
+fdgrad(mod2n)
+## OK for adaptive=FALSE
+
+localargs <- mod2n@args
+localargs$return_type <- "variances"
+.Call("model_output", localargs, package="rstpm2")
+localargs$return_type <- "modes"
+.Call("model_output", localargs, package="rstpm2")
 
 system.time(mod2nb <- stpm2(Surv(t1,t2,event)~var1,
                            data=dataAdditive,
                            RandDist="LogN",
-                           logH.formula=~ns(t2,df=7),
+                           logH.formula=~ns(log(t2),df=7),
                            cluster=dataAdditive$group, nodes=20))
 
+system.time(mod2g <- pstpm2(Surv(t1,t2,event)~var1,
+                           data=dataAdditive,
+                           RandDist="Gamma",
+                           smooth.formula=~s(log(t2)),
+                           cluster=dataAdditive$group))
+
+
 mod1 <- frailtyPenal(Surv(t1,t2,event)~cluster(group)+var1,data=dataAdditive,
-                     n.knots=8,kappa1=0.1,cross.validation=TRUE)
+                     n.knots=8,kappa=0.1,cross.validation=TRUE)
 mod1n <- frailtyPenal(Surv(t1,t2,event)~cluster(group)+var1,data=dataAdditive,
-                     n.knots=8,kappa1=0.1,cross.validation=TRUE, RandDist="LogN")
+                     n.knots=8,kappa=0.1,cross.validation=TRUE, RandDist="LogN")
 
 system.time(mod2 <- stpm2(Surv(t1,t2,event)~var1, # Gamma
                           data=dataAdditive,
@@ -116,19 +468,19 @@ system.time(mod2n <- stpm2(Surv(t1,t2,event)~var1,
                            data=dataAdditive,
                            RandDist="LogN",
                            optimiser="NelderMead",
-                           logH.formula=~ns(t2,df=7),
+                           logH.formula=~ns(log(t2),df=7),
                            cluster=dataAdditive$group, nodes=20))
 system.time(mod2nb <- stpm2(Surv(t1,t2,event)~var1,
                            data=dataAdditive,
                            RandDist="LogN",
-                           logH.formula=~ns(t2,df=7),
+                           logH.formula=~ns(log(t2),df=7),
                            cluster=dataAdditive$group, nodes=20))
 
 system.time(mod3 <- pstpm2(Surv(t1,t2,event)~var1,
                            data=dataAdditive,
                            RandDist="LogN",
                            criterion="BIC",
-                           smooth.formula=~s(t2),
+                           smooth.formula=~s(log(t2)),
                            cluster=dataAdditive$group, nodes=20))
 
 system.time(mod3 <- coxph(Surv(t1,t2,event)~frailty(group,distribution="gamma")+var1,data=dataAdditive))
@@ -145,11 +497,11 @@ require(rstpm2)
 require(ICE)
 data(ICHemophiliac)
 ICHemophiliac2 <- transform(as.data.frame(ICHemophiliac),event=3)
-fit1 <- stpm2(Surv(left,right,event,type="interval")~1,data=ICHemophiliac2)
+fit1 <- pstpm2(Surv(left,right,event,type="interval")~1,data=ICHemophiliac2,
+               smooth.formula=~s(right,k=7))
 estimate <- ickde(ICHemophiliac, m=200, h=0.9)
 plot(estimate, type="l", ylim=c(0,0.20))
 tt <- seq(0,20,length=301)[-1]
-## plot(fit1,newdata=data.frame(x=1),type="density",add=TRUE,line.col="blue")
 lines(tt,predict(fit1,newdata=data.frame(right=tt),type="density"),col="blue")
 
 ## reg1 <- survreg(Surv(left,right,event,type="interval")~1,data=ICHemophiliac2)
@@ -161,6 +513,25 @@ lines(tt,predict(fit1,newdata=data.frame(right=tt),type="density"),col="blue")
 ## plot(estimate, type="l", ylim=c(0,0.15))
 ## lines(tt,dweibull(tt,weibullShape,weibullScale),lty=2)
 
+
+library(rstpm2)
+library(survival)
+data(veteran)
+## Re-define variables
+veteran <- dplyr::mutate(veteran,
+                         squamous = ifelse(celltype=="squamous",1,0),
+                         smallcell = ifelse(celltype=="smallcell",1,0),
+                         adeno = ifelse(celltype=="adeno",1,0),
+                         large = ifelse(celltype=="large",1,0),
+                         prior.ty = ifelse(prior==0,0,1),
+                         trt = ifelse(trt==2,1,0),
+                         high = ifelse(karno > 50,1,0))
+lung<-subset(veteran, prior==0) ## patients with no prior therapy
+## Why no optimal smoothing parameters?? divergence with version 1.3.3
+pfit <-pstpm2(Surv(time,status==1) ~ adeno + smallcell + squamous,
+                          smooth.formula = ~s(log(time)) + s(karno), data=lung, link.type="PO", trace = 1)
+
+ 
 
 ## two-dimensional smoothers
 x1 <- x2 <- seq(0,1,length=11)

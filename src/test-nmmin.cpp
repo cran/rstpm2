@@ -45,6 +45,11 @@ namespace rstpm2 {
       Rprintf("%f ", v(i));
     Rprintf("\n");
   }
+  void Rprint(uvec const & v) {
+    for (size_t i=0; i<v.size(); ++i) 
+      Rprintf("%i ", v(i));
+    Rprintf("\n");
+  }
   void Rprint(vec const & v) {
     for (size_t i=0; i<v.size(); ++i) 
       Rprintf("%f ", v(i));
@@ -106,8 +111,19 @@ namespace rstpm2 {
     return wrap(out);
   }
 
+  class Link {
+  public:
+    virtual vec link(vec S) = 0;
+    virtual vec ilink(vec x) = 0;
+    virtual vec h(vec eta, vec etaD) = 0;
+    virtual vec H(vec eta) = 0;
+    virtual mat gradH(vec eta, mat X) = 0;
+    virtual mat gradh(vec eta, vec etaD, mat X, mat XD) = 0;
+    virtual ~Link() { }
+  };
+
   // Various link objects
-  class LogLogLink {
+  class LogLogLink : public Link {
   public:
     vec link(vec S) { return log(-log(S)); }
     vec ilink(vec x) { return exp(-exp(x)); }
@@ -132,9 +148,53 @@ namespace rstpm2 {
       }
       return c;
     }
+    LogLogLink(SEXP sexp) {}
   };
+
+  class ArandaOrdazLink : public Link {
+  public:
+    vec link(vec S) {
+      if (thetaAO==0)
+	return log(-log(S));
+      else return log((exp(log(S)*(-thetaAO))-1)/thetaAO);
+    }
+    vec ilink(vec eta) {
+      if (thetaAO==0)
+	return exp(-exp(eta));
+      else return exp(-log(thetaAO*exp(eta)+1)/thetaAO);
+    }
+    vec h(vec eta, vec etaD) {
+      if (thetaAO==0)
+	return etaD % exp(eta);
+      else return exp(eta) % etaD/(thetaAO*exp(eta)+1);
+    }
+    vec H(vec eta) {
+      if (thetaAO==0)
+	return exp(eta);
+      else return log(thetaAO*exp(eta)+1)/thetaAO;
+    }
+    mat gradH(vec eta, mat X) {
+      if (thetaAO==0)
+	return rmult(X,exp(eta));
+      else return rmult(X,exp(eta)/(1+thetaAO*exp(eta)));
+    }
+    mat gradh(vec eta, vec etaD, mat X, mat XD) { 
+      if (thetaAO==0)
+	return rmult(XD, exp(eta)) + rmult(X, etaD % exp(eta));
+      else {
+	vec denom = (thetaAO*exp(eta)+1) % (thetaAO*exp(eta)+1);
+	return rmult(XD,(thetaAO*exp(2*eta)+exp(eta))/denom)+rmult(X,exp(eta) % etaD/denom);
+      }
+    }
+    double thetaAO;
+    ArandaOrdazLink(SEXP sexp) { 
+      List args = as<List>(sexp);
+      thetaAO = as<double>(args["thetaAO"]);
+    }
+  };
+
   // Useful relationship: d/dx expit(x)=expit(x)*expit(-x) 
-  class LogitLink {
+  class LogitLink : public Link {
   public:
     vec link(vec S) { return -logit(S); }
     vec ilink(vec x) { return expit(-x); }
@@ -170,8 +230,9 @@ namespace rstpm2 {
       }
       return c;
     }
+    LogitLink(SEXP sexp) {}
   };
-  class ProbitLink {
+  class ProbitLink : public Link {
   public:
     vec link(vec S) { return -qnorm01(S); }
     vec ilink(vec eta) { return pnorm01(-eta); }
@@ -185,8 +246,19 @@ namespace rstpm2 {
 	rmult(X, dnorm01(eta) % dnorm01(eta) / pnorm01(-eta) / pnorm01(-eta) % etaD) +
 	rmult(XD,dnorm01(eta) / pnorm01(-eta));
     }
+    // incomplete implementation
+    cube hessianh(vec beta, mat X, mat XD) { 
+      cube c(beta.size(), beta.size(), X.n_rows, fill::zeros);
+      return c;
+    }
+    // incomplete implementation
+    cube hessianH(vec beta, mat X) { 
+      cube c(beta.size(), beta.size(), X.n_rows, fill::zeros);
+      return c;
+    }
+    ProbitLink(SEXP sexp) {}
   };
-  class LogLink {
+  class LogLink : public Link {
   public:
     vec link(vec S) { return -log(S); }
     vec ilink(vec x) { return exp(-x); }
@@ -194,8 +266,16 @@ namespace rstpm2 {
     vec H(vec eta) { return eta; }
     mat gradh(vec eta, vec etaD, mat X, mat XD) { return XD; }
     mat gradH(vec eta, mat X) { return X;  }
+    cube hessianh(vec beta, mat X, mat XD) { 
+      cube c(beta.size(), beta.size(), X.n_rows, fill::zeros);
+      return c;
+    }
+    cube hessianH(vec beta, mat X) { 
+      cube c(beta.size(), beta.size(), X.n_rows, fill::zeros);
+      return c;
+    }
+    LogLink(SEXP sexp) {}
   };
-
   // wrappers to call class methods from C
   template<class T>
   double optimfunction(int n, double * beta, void * void_obj) {
@@ -222,9 +302,9 @@ namespace rstpm2 {
     if (obj->bfgs.trace>1) {
       Rprintf("gradient="); Rprint(gr);
     }
-    if (obj->bfgs.trace>2) {
-      Rprintf("fdgradient="); Rprint(obj->fdgradient(coef % obj->parscale));
-    }
+    // if (obj->bfgs.trace>2) {
+    //   Rprintf("fdgradient="); Rprint(obj->fdgradient(coef % obj->parscale));
+    // }
     for (int i=0; i<n; ++i) grad[i] = gr[i];
   }
   template<class T>
@@ -305,7 +385,6 @@ namespace rstpm2 {
     }
     vec parscale;
   };
-
   class Nlm2 : public Nlm {
   public:
     NumericMatrix calc_hessian(fcn_p fn, void * ex) {
@@ -351,18 +430,95 @@ namespace rstpm2 {
     vec parscale;
   };
 
-
+  /** @brief Macro to define the optimisation functions. Defined as a macro
+      because the C API needs to pass a 'This' template parameter
+      which varies for the different classes (alternatively, this
+      could be defined using the curiously recurring template
+      pattern).
+  **/
+#define OPTIM_FUNCTIONS							\
+    void optimWithConstraintBFGS(NumericVector init) {			\
+      bool satisfied;							\
+      this->kappa = this->kappa_init;					\
+      do {								\
+	this->bfgs.optim(&optimfunction<This>, &optimgradient<This>, init, (void *) this); \
+	vec vcoef(&this->bfgs.coef[0],this->n);				\
+	satisfied = this->feasible(vcoef % this->parscale);		\
+	if (!satisfied) this->kappa *= 2.0;				\
+      } while ((!satisfied) && this->kappa < 1.0e3);			\
+      if (this->bfgs.trace > 0 && this->kappa>1.0) Rprintf("kappa=%f\n",this->kappa); \
+    }									\
+    void optimWithConstraintNM(NumericVector init) {			\
+      bool satisfied;							\
+      NelderMead2 nm;							\
+      nm.hessianp = false;						\
+      nm.parscale = this->parscale;					\
+      this->kappa = this->kappa_init;					\
+      do {								\
+	nm.optim(&optimfunction<This>, init, (void *) this);		\
+	vec vcoef(&nm.coef[0],this->n);					\
+	satisfied = this->feasible(vcoef % this->parscale);		\
+	if (!satisfied) this->kappa *= 2.0;				\
+      } while ((!satisfied) && this->kappa < this->maxkappa);			\
+      nm.hessian = nm.calc_hessian(&optimfunction<This>, (void *) this); \
+      this->bfgs.coef = nm.coef;					\
+      this->bfgs.hessian = nm.hessian;					\
+    }									\
+    void optimWithConstraintNlm(NumericVector init) {			\
+      bool satisfied;							\
+      Nlm2 nm;								\
+      nm.gradtl = nm.steptl = this->reltol;				\
+      nm.parscale = this->parscale;					\
+      this->kappa = this->kappa_init;					\
+      do {								\
+	nm.optim(&optimfunction_nlm<This>, init, (void *) this);	\
+	vec vcoef(&nm.coef[0],this->n);					\
+	satisfied = this->feasible(vcoef % this->parscale);		\
+	if (!satisfied) this->kappa *= 2.0;				\
+      } while ((!satisfied) && this->kappa < 1.0e3);			\
+      if (this->bfgs.trace > 0 && this->kappa>1.0) Rprintf("kappa=%f\n",this->kappa); \
+      nm.hessian = nm.calc_hessian(&optimfunction_nlm<This>, (void *) this); \
+      this->bfgs.coef = nm.coef;					\
+      this->bfgs.hessian = nm.hessian;					\
+    }									\
+    void optimWithConstraint(NumericVector init) {			\
+      if (this->bfgs.trace > 0) Rprintf("Starting optimization\n");	\
+      if (this->optimiser == "NelderMead")				\
+	optimWithConstraintNM(init);					\
+      else if (this->optimiser == "Nlm")				\
+	optimWithConstraintNlm(init);					\
+      else								\
+	optimWithConstraintBFGS(init);					\
+    }
+    
+  // struct for data
+  struct BaseData {
+    mat X, XD, X0, X1; 
+    vec bhazard,wt,wt0,event,time;
+    vec map0;
+    uvec ind0, which0;
+  };
   // Main class for Stpm2 (fully parametric)
-  template<class Link = LogLogLink>
-  class Stpm2 : public Link {
+  class Stpm2 : public BaseData {
   public:
-    typedef Stpm2<Link> This;
-    using Link::h;
-    using Link::H;
-    using Link::gradh;
-    using Link::gradH;
+    typedef Stpm2 This;
     Stpm2(SEXP sexp) : bfgs() {
       List list = as<List>(sexp);
+      std::string linkType = as<std::string>(list["link"]);
+      if (linkType=="PH")
+	link=new LogLogLink(sexp);
+      else if (linkType=="PO")
+	link=new LogitLink(sexp);
+      else if (linkType=="probit")
+	link=new ProbitLink(sexp);
+      else if (linkType=="AH")
+	link=new LogLink(sexp);
+      else if (linkType=="AO")
+	link=new ArandaOrdazLink(sexp);
+      else {
+	REprintf("No matching link.type");
+	return;
+      }
       bfgs.coef = init = as<NumericVector>(list["init"]);
       X = as<mat>(list["X"]); 
       XD = as<mat>(list["XD"]); 
@@ -375,31 +531,36 @@ namespace rstpm2 {
       n = init.size(); // number of parameters
       N = X.n_rows; // number of observations
       X1 = as<mat>(list["X1"]);
-      X0 = as<mat>(list["X1"]);
+      X0 = as<mat>(list["X0"]);
       wt0.set_size(N); wt0.fill(0.0);
       if (delayed) {
-	X0 = as<mat>(list["X0"]);
 	wt0 = as<vec>(list["wt0"]);
       }
-      if (interval) {
-	X1 = as<mat>(list["X1"]);
-      }
-      ind0 = as<uvec>(list["ind0"]); // length N boolean
-      map0 = as<uvec>(list["map0"]); // length N map from individuals to row of X0
-      which0 = as<uvec>(list["which0"]); // length N0 indicator for X0
-      kappa = as<double>(list["kappa"]);
+      // if (interval) {
+      // 	X1 = as<mat>(list["X1"]);
+      // }
+      map0 = as<vec>(list["map0"]); // length N map for X->X0
+      full_which0 = as<vec>(list["which0"]); // length N map for X0->X
+      ind0 = as<uvec>(list["ind0"]); // length N boolean for X0
+      ttype = as<vec>(list["ttype"]); 
+      kappa_init = kappa = as<double>(list["kappa"]);
+      maxkappa = as<double>(list["maxkappa"]);
       optimiser = as<std::string>(list["optimiser"]);
       bfgs.trace = as<int>(list["trace"]);
       reltol = bfgs.reltol = as<double>(list["reltol"]);
       bfgs.hessianp = false;
       bfgs.parscale = parscale = as<vec>(list["parscale"]);
+      which0 = removeNaN(full_which0);
     }
     // log-likelihood components and constraints
     // Note: the li and gradli components depend on other variables (bhazard, wt, wt0, wt, event);
     //       calculations should *not* be done on subsets
+    virtual ~Stpm2() {
+      delete link;
+    }
     li_constraint li_right_censored(vec eta, vec etaD) {
-      vec h = Link::h(eta,etaD) + bhazard;
-      vec H = Link::H(eta);
+      vec h = link->h(eta,etaD) + bhazard;
+      vec H = link->H(eta);
       vec eps = h*0.0 + 1.0e-16; 
       double constraint = kappa/2.0 * (sum(h % h % (h<0)) +
 				       sum(H % H % (H<0))); 
@@ -410,17 +571,17 @@ namespace rstpm2 {
       return out;
     }
     li_constraint li_left_truncated(vec eta0) {
-      vec H0 = Link::H(eta0);
+      vec H0 = link->H(eta0);
       double constraint = kappa/2.0 * sum(H0 % H0 % (H0<0));
-      vec eps = H0*0.0 + 1e-16;
+      vec eps = H0*0.0 + 1.0e-16; 
       vec li = wt0 % max(H0,eps);
       li_constraint out = {li, constraint};
       return out;
     }
     li_constraint li_interval(vec eta, vec etaD, vec eta1) {
-      vec H = Link::H(eta);
-      vec H1 = Link::H(eta1);
-      vec h = Link::h(eta, etaD) + bhazard;
+      vec H = link->H(eta);
+      vec H1 = link->H(eta1);
+      vec h = link->h(eta, etaD) + bhazard;
       double constraint = kappa/2.0 * (sum(H % H % (H<0))+
 				       sum(h % h % (h<0))+
 				       sum(H1 % H1 % (H1<0)));
@@ -447,9 +608,12 @@ namespace rstpm2 {
       }
       else {
 	li_constraint s = li_right_censored(eta, etaD);
-	if (delayed) {
+	if (delayed && !eta0.empty()) {
 	  li_constraint s0 = li_left_truncated(eta0);
 	  s.constraint += s0.constraint;
+	  if (bfgs.trace > 0) {
+	    Rprint(which0);
+	  }
 	  s.li(which0) += s0.li;
 	}
 	return s;
@@ -477,37 +641,35 @@ namespace rstpm2 {
     // Note: gradH and gradh are currently calculated at eta and etaD and may not satisfy the constraints, 
     //       while H and h may be transformed for the constraints 
     gradli_constraint gradli_right_censored(vec eta, vec etaD, mat X, mat XD) {
-      vec h = Link::h(eta,etaD) + bhazard;
-      vec H = Link::H(eta);
-      vec eps = h*0.0 + 1.0e-16; // hack
-      mat gradH = Link::gradH(eta,X);
-      mat gradh = Link::gradh(eta,etaD,X,XD);
-      mat Xconstraint = kappa * (rmult(gradh,h%(h<eps)) +
-				 rmult(gradH,H % (H<eps)));
-      H = max(H,eps);
-      h = max(h,eps);
+      vec h = link->h(eta,etaD) + bhazard;
+      vec H = link->H(eta);
+      vec eps = h*0.0 + 1.0e-16;
+      mat gradH = link->gradH(eta,X);
+      mat gradh = link->gradh(eta,etaD,X,XD);
+      mat Xconstraint = kappa * (rmult(gradh, h % (h<0)) +
+				 rmult(gradH, H % (H<0)));
+      // h = max(h,eps);
       mat Xgrad = -rmult(gradH, wt) + rmult(gradh, event / h % wt);
       gradli_constraint out = {Xgrad, Xconstraint};
       return out;
     }
     gradli_constraint gradli_left_truncated(vec eta0, mat X0) {
-      mat gradH0 = Link::gradH(eta0, X0); 
-      vec H0 = Link::H(eta0); 
-      vec eps = H0*0.0 + 1.0e-16; // hack
-      mat Xconstraint = kappa * rmult(gradH0, H0 % (H0<eps));
-      H0 = max(H0,eps);
+      mat gradH0 = link->gradH(eta0, X0); 
+      vec H0 = link->H(eta0); 
+      vec eps = H0*0.0 + 1.0e-16;
+      mat Xconstraint = kappa * rmult(gradH0, H0 % (H0<0));
       mat Xgrad = rmult(gradH0, wt0);
       gradli_constraint out = {Xgrad, Xconstraint};
       return out;
     }
     gradli_constraint gradli_interval_censored(vec eta, vec etaD, vec eta1, 
 						       mat X, mat XD, mat X1) {
-      vec H = Link::H(eta);
-      vec h = Link::h(eta,etaD);
-      vec H1 = Link::H(eta1);
-      mat gradH = Link::gradH(eta,X);
-      mat gradH1 = Link::gradH(eta1,X1);
-      mat gradh = Link::gradh(eta, etaD, X, XD);
+      vec H = link->H(eta);
+      vec h = link->h(eta,etaD);
+      vec H1 = link->H(eta1);
+      mat gradH = link->gradH(eta,X);
+      mat gradH1 = link->gradH(eta1,X1);
+      mat gradh = link->gradh(eta, etaD, X, XD);
       vec eps = H*0.0 + 1e-16;
       mat Xconstraint = kappa * (rmult(gradH, H % (H<eps))+
 				 rmult(gradh, h % (h<eps))+
@@ -518,15 +680,15 @@ namespace rstpm2 {
       mat li(N,n,fill::zeros);
       uvec index;
       index = find(ttype == 0); // right censored
-      if (any(index)) li(index) -= rmult(gradH.rows(index),wt(index));
+      if (any(index)) li.rows(index) -= rmult(gradH.rows(index),wt(index));
       index = find(ttype == 1); // exact
-      if (any(index)) li(index) += rmult(gradh.rows(index),wt(index) / h(index)) - rmult(gradH.rows(index),wt(index));
+      if (any(index)) li.rows(index) += rmult(gradh.rows(index),wt(index) / h(index)) - rmult(gradH.rows(index),wt(index));
       index = find(ttype == 2); // left censored
-      if (any(index)) li(index) += rmult(-gradH.rows(index),-exp(-H(index)) / (1-exp(-H(index))) % wt(index));
+      if (any(index)) li.rows(index) += rmult(-gradH.rows(index),-exp(-H(index)) / (1-exp(-H(index))) % wt(index));
       index = find(ttype == 3); // interval censored
       if (any(index)) {
 	vec V = wt(index) / (exp(-H(index)) - exp(-H1(index)));
-	li(index) += rmult(gradH1.rows(index),V % exp(-H1(index))) - 
+	li.rows(index) += rmult(gradH1.rows(index),V % exp(-H1(index))) - 
 	  rmult(gradH.rows(index),V % exp(-H(index)));
       }
       gradli_constraint out = {li, Xconstraint};
@@ -553,20 +715,20 @@ namespace rstpm2 {
       rowvec vgr = sum(gc.gradli,0);
       vec gr(n);
       for (size_t i = 0; i<beta.size(); ++i) {
-	gr[i] = vgr[i] - dconstraint[i];
+	gr[i] = vgr[i];// - dconstraint[i];
       }
       return -gr;
     }
     bool feasible(vec beta) {
       vec eta = X * beta;
       vec etaD = XD * beta;
-      vec h = Link::h(eta, etaD) + bhazard;
-      vec H = Link::H(eta);
+      vec h = link->h(eta, etaD) + bhazard;
+      vec H = link->H(eta);
       bool condition = all((h>0) % (H>0));
       if (delayed) {
 	vec eta0 = X0 * beta;
 	// vec etaD0 = XD0 * beta;
-	vec H0 = Link::H(eta0);
+	vec H0 = link->H(eta0);
 	condition = condition && all(H0>0);
       }
       return condition;
@@ -580,69 +742,49 @@ namespace rstpm2 {
 	init[i] *= parscale[i];
       }
     }
-    void optimWithConstraintBFGS(NumericVector init) {
-      bool satisfied;
-      do {
-	bfgs.optim(&optimfunction<This>, &optimgradient<This>, init, (void *) this);
-	vec vcoef(&bfgs.coef[0],n);
-	satisfied = feasible(vcoef % parscale);
-	if (!satisfied) kappa *= 2.0;   
-      } while ((!satisfied) && kappa < 1.0e3);
+    OPTIM_FUNCTIONS;
+    // NumericMatrix calcHessian(NumericVector nvbeta) {
+    //   // not defined for interval-censored or probit link
+    //   vec beta(&nvbeta[0],n);
+    //   vec eta = X * beta;
+    //   vec etaD = XD * beta;
+    //   vec h = link->h(eta,etaD);
+    //   mat gradh = link->gradh(eta,etaD,X,XD);
+    //   cube hessianh = link->hessianh(beta,X,XD);
+    //   cube hessianH = link->hessianH(beta,X);
+    //   cube hessianH0 = link->hessianH(beta,X0);
+    //   mat hessian = -arma::sum(hessianH,2);
+    //   if (delayed)
+    // 	hessian += arma::sum(hessianH0,2);
+    //   for (int i=0; i<N; ++i) 
+    // 	hessian += event(i)/h(i)*hessianh.slice(i) -
+    // 	  event(i)/h(i)/h(i)*gradh.row(i).t()*gradh.row(i);
+    //   return wrap(-hessian);
+    // }
+    uvec map0f(uvec index) {
+      return removeNaN(this->map0(index));
     }
-    void optimWithConstraintNM(NumericVector init) {
-      bool satisfied;
-      NelderMead2 nm;
-      nm.hessianp = false;
-      nm.parscale = parscale;
-      do {
-	nm.optim(&optimfunction<This>, init, (void *) this);
-	vec vcoef(&nm.coef[0],n);
-	satisfied = feasible(vcoef % parscale);
-	if (!satisfied) kappa *= 2.0;   
-      } while ((!satisfied) && kappa < 1.0e3);
-      nm.hessian = nm.calc_hessian(&optimfunction<This>, (void *) this);
-      bfgs.coef = nm.coef;
-      bfgs.hessian = nm.hessian;
+    uvec which0f(uvec index) {
+      vec which = this->full_which0(index);
+      return find(which == which);
     }
-    void optimWithConstraint(NumericVector init) {
-      if (this->optimiser == "NelderMead")
-	optimWithConstraintNM(init);
-      else
-	optimWithConstraintBFGS(init);
+    uvec removeNaN(vec x) {
+      vec newx = x;
+      uvec index = find(newx == newx); // NaN != NaN
+      newx = newx(index);
+      return conv_to<uvec>::from(newx);
     }
-    // find the left truncated values for a given index
-    uvec find0() { return map0(find(ind0)); }
-    uvec find0(vec index) { return (map0(index))(find(ind0(index))); }
+    SEXP return_modes() { return wrap(-1); } // used in NormalSharedFrailties
+    SEXP return_variances() { return wrap(-1); } // used in NormalSharedFrailties
     NumericVector init;
-    mat X, XD, X0, X1; 
-    vec bhazard,wt,wt0,event,time,parscale,ttype;
-    double kappa, reltol;
+    vec parscale, ttype, full_which0;
+    double kappa_init, kappa, maxkappa, reltol;
     bool delayed, interval;
     int n, N;
     BFGS2 bfgs;
-    uvec ind0, map0, which0;
     std::string optimiser;
+    Link * link;
   };
-
-  // RcppExport SEXP optim_stpm2_nlm(SEXP args) {
-  //   stpm2 data(args);
-  //   data.init = ew_div(data.init,data.parscale);
-  //   int n = data.init.size();
-  //   Nlm nlm;
-  //   nlm.gradtl = nlm.steptl = data.reltol;
-  //   //nlm.method=2; nlm.stepmx=0.0;
-  //   bool satisfied;
-  //   do {
-  //     nlm.optim(& fminfn_nlm<stpm2>, & grfn<stpm2>, data.init, (void *) &data);
-  //     satisfied = fminfn_constraint<stpm2>(n,&nlm.coef[0],(void *) &data);
-  //     if (!satisfied) data.kappa *= 2.0;
-  //   } while (!satisfied && data.kappa<1.0e5);
-  //   nlm.coef = ew_mult(nlm.coef, data.parscale);
-  //   return List::create(_("itrmcd")=wrap(nlm.itrmcd),
-  // 			_("niter")=wrap(nlm.itncnt),
-  // 			_("coef")=wrap(nlm.coef),
-  // 			_("hessian")=wrap(nlm.hessian));
-  // }
 
   // penalised smoothers 
   // _Not_ sub-classes of Pstpm2, hence the longer function signatures
@@ -758,7 +900,6 @@ namespace rstpm2 {
   // }
   //   std::vector<Smoother> smooth;
   // };
-
   template<class T>
   double pstpm2_multivariate_step(int n, double * logsp_ptr, void * model_ptr) {
     T * model = static_cast<T *>(model_ptr);
@@ -779,9 +920,9 @@ namespace rstpm2 {
     R_CheckUserInterrupt();  /* be polite -- did the user hit ctrl-C? */
     *objective = model->multivariate_step(logsp);
   }    
-
+  
   // Penalised link-based models
-  template<class Stpm2Type = Stpm2<LogLogLink>, class Smooth = SmoothLogH>
+  template<class Stpm2Type = Stpm2, class Smooth = SmoothLogH>
   class Pstpm2 : public Stpm2Type, public Smooth {
   public:
     typedef Pstpm2<Stpm2Type,Smooth> This;
@@ -806,17 +947,14 @@ namespace rstpm2 {
     vec gradient0(vec beta) {
       return Stpm2Type::gradient(beta);
     }
-    // is the following strictly needed - or even correct?
-    void optimWithConstraint(NumericVector init) {
-      bool satisfied;
-      if (this->bfgs.trace > 0) 
-	Rprintf("Starting optimization\n");
-      do {
-	this->bfgs.optim(&optimfunction<This>, &optimgradient<This>, init, (void *) this);
-	vec vcoef(&this->bfgs.coef[0],this->n);
-	satisfied = Stpm2Type::feasible(vcoef % this->parscale);
-	if (!satisfied) this->kappa *= 2.0;   
-      } while ((!satisfied) && this->kappa < 1.0e3);
+    OPTIM_FUNCTIONS;
+    double calc_edf(NumericMatrix hessian0) {
+      double max_edf = this->bfgs.hessian.ncol();
+      mat m;
+      bool flag = arma::solve(m, as<mat>(this->bfgs.hessian), as<mat>(hessian0));
+      double edf = flag ? arma::trace(m) : (max_edf*2.0);
+      if (edf<0.0) edf = max_edf*2.0;
+      return edf;
     }
     double first_step(double logsp) {
       sp[0] = exp(logsp);
@@ -834,7 +972,7 @@ namespace rstpm2 {
 	  Rprint(this->bfgs.hessian);
 	}
       }
-      double edf = arma::trace(solve(as<mat>(this->bfgs.hessian),as<mat>(hessian0)));
+      double edf = calc_edf(hessian0);
       double negll = this->bfgs.calc_objective(&optimfunction<Stpm2Type>, (void *) this);
       double gcv =  negll + alpha*edf;
       double bic =  negll + alpha*edf*log(sum(this->event));
@@ -856,7 +994,7 @@ namespace rstpm2 {
       this->optimWithConstraint(this->init);
       this->bfgs.hessian = this->bfgs.calc_hessian(&optimgradient<This>, (void *) this);
       NumericMatrix hessian0 = this->bfgs.calc_hessian(&optimgradient<Stpm2Type>, (void *) this);
-      double edf = arma::trace(solve(as<mat>(this->bfgs.hessian),as<mat>(hessian0)));
+      double edf = calc_edf(hessian0);
       double negll = this->bfgs.calc_objective(&optimfunction<Stpm2Type>, (void *) this);
       double gcv =  negll + alpha*edf;
       double bic =  2.0*negll + alpha*edf*log(sum(this->event));
@@ -892,7 +1030,8 @@ namespace rstpm2 {
 			  _("coef")=wrap(this->bfgs.coef),
 			  _("hessian")=wrap(this->bfgs.hessian),
 			  _("edf")=wrap(edf),
-			  _("edf_var")=wrap(edf_var)
+			  _("edf_var")=wrap(edf_var),
+			  _("kappa")=wrap(this->kappa)
 			  );
     }
     SEXP optim_first() { 
@@ -922,7 +1061,7 @@ namespace rstpm2 {
 	nm.optim(&pstpm2_multivariate_step<This>, logsp, (void *) this);
 	satisfied = true;
 	for (size_t i=0; i < sp.size(); ++i)
-	  if (logsp[i]< -7.0 || logsp[i] > 7.0) satisfied = false;
+	  if (logsp[i]< -9.0 || logsp[i] > 9.0) satisfied = false;
 	if (!satisfied) this->kappa *= 2.0;
       } while (!satisfied && this->kappa<1.0e5);
       for (int i=0; i < nm.coef.size(); ++i)
@@ -932,7 +1071,7 @@ namespace rstpm2 {
       return optim_fixed();
     }
     SEXP optim_multivariate_Nlm() {
-      this->kappa = 10.0;
+      this->kappa = this->kappa_init;
       Nlm2 nm;
       nm.gradtl = nm.steptl = reltol_outer;
       nm.itnlim = 100;
@@ -947,7 +1086,7 @@ namespace rstpm2 {
   nm.optim(&pstpm2_multivariate_stepNlm<This>, logsp, (void *) this);
 	satisfied = true;
 	for (size_t i=0; i < sp.size(); ++i)
-	  if (logsp[i]< -7.0 || logsp[i] > 7.0) satisfied = false;
+	  if (logsp[i]< -9.0 || logsp[i] > 9.0) satisfied = false;
 	if (!satisfied) this->kappa *= 2.0;
       } while (!satisfied && this->kappa<1.0e5);
       for (int i=0; i < nm.coef.size(); ++i)
@@ -977,11 +1116,12 @@ namespace rstpm2 {
     GammaSharedFrailty(SEXP sexp) : Base(sexp) {
       List list = as<List>(sexp);
       ivec cluster = as<ivec>(list["cluster"]);
+      recurrent = as<bool>(list["recurrent"]);
       // wragged array indexed by a map of vectors
       for (size_t id=0; id<cluster.size(); ++id) {
 	clusters[cluster[id]].push_back(id);
-	if (this->event[id]==1)
-	  cluster_events[cluster[id]].push_back(id);
+	if (this->ind0[id])
+	  cluster_delayed[cluster[id]].push_back(id);
       }
     }
     /** 
@@ -998,8 +1138,8 @@ namespace rstpm2 {
       double theta = exp(beta[n-1]);
       vec eta = this->X * vbeta;
       vec etaD = this->XD * vbeta;
-      vec h = Base::h(eta,etaD) + this->bhazard;
-      vec H = Base::H(eta);
+      vec h = this->link->h(eta,etaD) + this->bhazard;
+      vec H = this->link->H(eta);
       double constraint = this->kappa/2.0 * (sum(h % h % (h<0)) + sum(H % H % (H<0)));
       vec eps = h*0.0 + 1.0e-16; 
       h = max(h,eps);
@@ -1007,7 +1147,7 @@ namespace rstpm2 {
       vec H0;
       if (this->delayed) {
 	vec eta0 = this->X0 * vbeta;
-	H0 = Base::H(eta0);
+	H0 = this->link->H(eta0);
 	constraint += this->kappa/2.0 * sum(H0 % H0 % (H0<0));
       }
       double ll = 0.0;
@@ -1016,16 +1156,22 @@ namespace rstpm2 {
 	int mi = sum(this->event(index));
 	double sumH = sum(H(index));
 	double sumHenter = 0.0;
-	ll += sum(log(h(index)) % this->event(index));
-	if (this->delayed && cluster_events.count(it->first) > 0) {
-	  uvec ind00 = conv_to<uvec>::from(cluster_events[it->first]);
-	  sumHenter = sum(H0(ind00));
+	ll += sum(log(h(index)) % this->event(index)); // shared
+	if (this->delayed && !cluster_delayed[it->first].empty()) {
+	  uvec ind00 = conv_to<uvec>::from(cluster_delayed[it->first]);
+	  sumHenter = sum(H0(Base::map0f(ind00)));
 	}
-	 ll += -(1.0/theta+mi)*log(1.0+theta*(sumH)) + 1.0/theta*log(1.0+theta*sumHenter); // Rondeau et al
-	// ll -= (1.0/theta+mi)*log(1.0+theta*(sumH - sumHenter)); // conditional (Gutierrez 2002)
-	if (mi>0) {
+	if (recurrent) {
+	  ll += -(1.0/theta+mi)*log(1.0+theta*(sumH - sumHenter)); // Gutierrez (2002)
+	} else {
+	  ll += -(1.0/theta+mi)*log(1.0+theta*sumH) + 1.0/theta*log(1.0+theta*sumHenter); // Rondeau et al
+	}
+	if (!recurrent && mi>0) { 
 	  for (int k=1; k<=mi; ++k)
 	    ll += log(1.0+theta*(mi-k));
+	}
+	if (recurrent && mi>0) {
+	  ll += R::lgammafn(1.0/theta+mi)-R::lgammafn(1.0/theta)+mi*log(theta); // Gutierrez (2002)
 	}
       }
       ll -= constraint;
@@ -1040,10 +1186,10 @@ namespace rstpm2 {
       double theta = exp(beta[n-1]);
       vec eta = this->X * vbeta;
       vec etaD = this->XD * vbeta;
-      vec h = Base::h(eta,etaD);
-      vec H = Base::H(eta);
-      mat gradh = Base::gradh(eta,etaD,this->X,this->XD);
-      mat gradH = Base::gradH(eta,this->X);
+      vec h = this->link->h(eta,etaD);
+      vec H = this->link->H(eta);
+      mat gradh = this->link->gradh(eta,etaD,this->X,this->XD);
+      mat gradH = this->link->gradH(eta,this->X);
       vec eps = h*0.0 + 1.0e-16; 
       h = max(h,eps);
       H = max(H,eps);
@@ -1052,8 +1198,8 @@ namespace rstpm2 {
       if (this->delayed) {
 	vec eta0 = this->X0 * vbeta;
 	// vec etaD0 = this->XD0 * vbeta;
-	H0 = Base::H(eta0);
-	gradH0 = Base::gradH(eta0,this->X0);
+	H0 = this->link->H(eta0);
+	gradH0 = this->link->gradH(eta0,this->X0);
       }
       for (IndexMap::iterator it=clusters.begin(); it!=clusters.end(); ++it) {
 	int mi=0;
@@ -1065,9 +1211,10 @@ namespace rstpm2 {
 	for (Index::iterator j=it->second.begin(); j!=it->second.end(); ++j) {
 	  sumH += H(*j);
 	  gradHi += gradH.row(*j).t();
-	  gradi += gradh.row(*j).t() / h(*j) * this->event(*j);
-	  if (this->event(*j)==1) 
+	  if (this->event(*j)==1) {
+	    gradi += gradh.row(*j).t() / h(*j);
 	    mi++;
+	  }
 	  if (this->delayed  && this->ind0[*j]) {
 	    int jj = this->map0[*j];
 	    sumHenter += H0(jj);
@@ -1077,25 +1224,28 @@ namespace rstpm2 {
 	  grconstraint += this->kappa * ((gradh.row(*j).t() * h(*j) * (h(*j)<0)) + (gradH.row(*j).t() * H(*j) * (H(*j)<0)));
 	}
 	for (int k=0; k<n-1; ++k) {
-	  // gr(k) += gradi(k) - (1+mi*theta)*(gradHi(k)-gradH0i(k))/(1+theta*(sumH-sumHenter)) - grconstraint(k); // Gu tierrez
-	   gr(k) += gradi(k) - (1+mi*theta)*gradHi(k)/(1+theta*(sumH)) + 1.0/(1+theta*sumHenter)*gradH0i(k) - grconstraint(k); // Rondeau et al
+	  if (recurrent) {
+	  gr(k) += gradi(k) - (1.0/theta+mi)*theta*(gradHi(k)-gradH0i(k))/(1+theta*(sumH-sumHenter)) - grconstraint(k); // Gutierrez
+	  } else {
+	    gr(k) += gradi(k) - theta*(1.0/theta+mi)*gradHi(k)/(1+theta*sumH) + 1.0/(1+theta*sumHenter)*gradH0i(k) - grconstraint(k); // Rondeau et al
+	  }
 	}
-	double lastterm = 0.0;
-	if (mi>0) {
-	  for (int k=1; k<=mi; ++k)
-	    lastterm += theta*(mi-k)/(1.0+theta*(mi-k));
+	if (recurrent) {
+	  // axiom: D(-(1/exp(btheta)+mi)*log(1+exp(btheta)*H),btheta)
+	  // axiom: D(log(Gamma(1/exp(btheta)+mi))-log(Gamma(1/exp(btheta)))+mi*btheta,btheta)
+	  double H = sumH - sumHenter;
+	  gr(n-1) += ((1+theta*H)*log(1+H*theta)-H*mi*theta*theta - H*theta)/(H*theta*theta + theta) + (-R::digamma(1.0/theta+mi)+R::digamma(1/theta)+mi*theta)/theta;
+	} else {
+	  // axiom: D(-(1/exp(btheta)+mi)*log(1+exp(btheta)*H),btheta)
+	  // axiom: D(1.0/exp(btheta)*log(1+exp(btheta)*H0),btheta)
+	  gr(n-1) += ((1+sumH*theta)*log(1+sumH*theta)-sumH*mi*theta*theta-sumH*theta)/(sumH*theta*theta+theta);
+	  gr(n-1) += (-(1+sumHenter*theta)*log(sumHenter*theta+1)+sumHenter*theta)/(sumHenter*theta*theta+theta); 
+	  if (mi>0) {
+	    for (int k=1; k<=mi; ++k)
+	      // axiom: D(log(1+exp(btheta)*(mi-k)),btheta)
+	      gr(n-1) += theta*(mi-k)/(1.0+theta*(mi-k));
+	  }
 	}
-	// gr(n-1) += log(1.0+theta*(sumH-sumHenter))/theta - 
-	//   (1.0/theta+mi)*theta*(sumH-sumHenter)/(1.0+theta*(sumH-sumHenter)) + 
-	//   lastterm; // Gutierrez 
-	gr(n-1) += log(1.0+theta*sumH)/theta - 
-	  (1.0+mi*theta)*sumH/(1.0+theta*sumH) + 
-	  sumHenter/(1.0+theta*sumHenter) -
-	  log(1.0+theta*sumHenter)/theta +
-	  lastterm; // Rondeau et al
-      }
-      if (this->bfgs.trace>1) {
-	Rprintf("Calculating fdgradient:\n"); Rprint(this->fdgradient(beta)); Rprintf("(=fdgradient)\n");
       }
       return -gr;  
     }
@@ -1104,35 +1254,36 @@ namespace rstpm2 {
       coef.resize(this->n-1);
       return Base::feasible(coef);
     }
-    void optimWithConstraint(NumericVector init) {
-      bool satisfied;
-      if (this->bfgs.trace > 0) 
-	Rprintf("Starting optimization\n");
-      do {
-	this->bfgs.optim(&optimfunction<This>, &optimgradient<This>, this->init, (void *) this);
-	vec vcoef(&this->bfgs.coef[0],this->n); 
-	satisfied = feasible(vcoef % this->parscale);
-	if (!satisfied) this->kappa *= 2.0;   
-      } while ((!satisfied) && this->kappa < 1.0e3);
-    }
-    void optimWithConstraintNM(NumericVector init) {
-      bool satisfied;
-      NelderMead2 nm;
-      nm.hessianp = false;
-      nm.parscale = this->parscale;
-      do {
-	nm.optim(&optimfunction<This>, this->init, (void *) this);
-	vec vcoef(&this->bfgs.coef[0],this->n); 
-	satisfied = feasible(vcoef % this->parscale);
-	if (!satisfied) this->kappa *= 2.0;   
-      } while ((!satisfied) && this->kappa < 1.0e3);
-      nm.hessian = nm.calc_hessian(&optimfunction<This>, (void *) this);
-      this->bfgs.coef = nm.coef;
-      this->bfgs.hessian = nm.hessian;
-    }
-    IndexMap clusters, cluster_events;
+    OPTIM_FUNCTIONS;
+    IndexMap clusters, cluster_delayed;
+    bool recurrent;
   };
 
+
+  /** @brief Wrapper for calling an objective_cluster method
+   **/
+  template<class T>
+  double call_objective_cluster(double bi, void * model_ptr) {
+    T * model = static_cast<T *>(model_ptr);
+    return model->objective_cluster(bi);
+  }    
+  template<class T>
+  double call_gradient_cluster(double bi, void * model_ptr) {
+    T * model = static_cast<T *>(model_ptr);
+    return model->gradient_cluster(bi);
+  }    
+  /** @brief Wrapper for calling a gradient_cluster method
+   **/
+  template<class T>
+  double call_objective_cluster_bfgs(int n, double *bi, void * model_ptr) {
+    T * model = static_cast<T *>(model_ptr);
+    return model->objective_cluster(*bi);
+  }    
+  template<class T>
+  void call_gradient_cluster_bfgs(int dim, double * bi, double* out, void * model_ptr) {
+    T * model = static_cast<T *>(model_ptr);
+    *out = model->gradient_cluster(*bi);
+  }    
   /** 
       Extension of stpm2 and pstpm2 to include log-normal shared frailties with a cluster variable
   **/
@@ -1142,64 +1293,305 @@ namespace rstpm2 {
     typedef std::vector<int> Index;
     typedef std::map<int,Index> IndexMap;
     typedef NormalSharedFrailty<Base> This;
+    typedef std::map<int,double> Doubles;
     NormalSharedFrailty(SEXP sexp) : Base(sexp) {
       List list = as<List>(sexp);
+      const BaseData fullTmp = {this->X, this->XD, this->X0, this->X1, this->bhazard,
+				this->wt, this->wt0, this->event, this->time,
+				this->map0, this->ind0, this->which0};
+      full = fullTmp;
       IntegerVector cluster = as<IntegerVector>(list["cluster"]);
+      full_Z = Z = as<vec>(list["Z"]);
+      full_Z0 = Z0 = Z(this->ind0); // this could be size 0...
       gauss_x = as<vec>(list["gauss_x"]); // node values
       gauss_w = as<vec>(list["gauss_w"]); // probability weights
+      adaptive = as<bool>(list["adaptive"]);
+      recurrent = as<bool>(list["recurrent"]);
+      first = true;
       // wragged array indexed by a map of vectors
       for (int id=0; id<cluster.size(); ++id) {
 	clusters[cluster[id]].push_back(id);
-	if (this->event[id]==1) {
-	  cluster_events[cluster[id]].push_back(id);
-	  cluster_event_indices[cluster[id]].push_back(id);
-	}
       }
     }
     /** 
 	Objective function for a log-normal shared frailty
 	Assumes that weights == 1.
     **/
-    double objective(vec beta) {
+    double objective_nonadaptive(vec beta) {
       int n = beta.size();
       vec vbeta(beta); // nu=log(variance) is the last parameter in beta; exp(nu)=sigma^2
       vbeta.resize(n-1);
       double sigma = exp(0.5*beta[n-1]); // standard deviation
       int K = gauss_x.size(); // number of nodes
-      mat lijk(this->N,K);
-      double constraint = 0.0;
       vec wstar = gauss_w/sqrt(datum::pi);
+      double constraint = 0.0;
+      double ll = 0.0;
+      bool left_trunc_not_recurrent = (this->delayed && !this->recurrent && !this->interval);
+      for (IndexMap::iterator it=clusters.begin(); it!=clusters.end(); ++it) {
+	clusterDesign(it);
+	vec eta = this->X * vbeta;
+	vec etaD = this->XD * vbeta;
+	vec eta0(1,fill::zeros);
+	vec eta1(this->X.n_rows,fill::zeros);
+	if (this->delayed) {
+	  eta0 = this->X0 * vbeta;
+	  eta1 = this->X1 * vbeta;
+	}
+	double Lj = 0.0, L0j = 0.0;
+	for (int k=0; k<K; ++k) {
+	  li_constraint lik, H0ik;
+	  double bi = sqrt(2.0)*sigma*this->gauss_x(k);
+	  if (left_trunc_not_recurrent) {
+	    this->delayed = false; 
+	    lik = Base::li(eta+Z*bi,etaD,eta0+Z0*bi,eta1+Z*bi);
+	    this->delayed = true; 
+	    H0ik = Base::li_left_truncated(eta0+Z0*bi);
+	    L0j += exp(-sum(H0ik.li))*wstar(k);
+	    constraint += H0ik.constraint;
+	  } else {
+	    lik = Base::li(eta+Z*bi,etaD,eta0+Z0*bi,eta1+Z*bi);
+	  }
+	  Lj += exp(sum(lik.li))*wstar(k);
+	  constraint += lik.constraint;
+	}
+	ll += log(Lj);
+	if (left_trunc_not_recurrent)
+	  ll -= log(L0j);
+      }
+      resetDesign();
+      return -(ll - constraint);
+    }
+    double objective(vec beta) {
+      return this->adaptive ? objective_adaptive(beta) : objective_nonadaptive(beta);
+    }
+    double objective_adaptive(vec beta) {
+      int n = beta.size();
+      this->objective_cluster_beta = beta; // for use by objective_cluster()
+      vec vbeta(beta); // nu=log(variance) is the last parameter in beta; exp(nu)=sigma^2
+      double sigma = exp(0.5*vbeta(this->n-1)); // standard deviation
+      vbeta.resize(n-1);
+      int K = gauss_x.size(); // number of nodes
+      double constraint = 0.0;
+      double ll = 0.0;
+      bool left_trunc_not_recurrent = (this->delayed && !this->recurrent && !this->interval);
+      for (IndexMap::iterator it=clusters.begin(); it!=clusters.end(); ++it) {
+	clusterDesign(it);
+	// cluster-specific mode
+	double mu;
+	if (!first) {
+	  // double Tol = this->reltol;
+	  // int Maxit = 100;
+	  // mu = R_zeroin2(-100.0,
+	  // 		 100.0,
+	  // 		 gradient_cluster(-100.0),
+	  // 		 gradient_cluster(100.0),
+	  // 		 &(call_gradient_cluster<This>),
+	  // 		 (void *) this,
+	  // 		 &Tol,
+	  // 		 &Maxit);
+	  mu = Brent_fmin(muhat[it->first]-1e-1,
+	  		  muhat[it->first]+1e-1,
+	  		  &(call_objective_cluster<This>),
+	  		  (void *) this,
+	  		  this->reltol);
+	}
+	if (first || std::abs(mu-muhat[it->first])>(1e-1-1e-5))
+	// if (first || mu>100.0-1e-5 || mu<-100.0+1e-5)
+	  mu = Brent_fmin(-100.0,100.0,&(call_objective_cluster<This>),(void *) this,
+			  this->reltol);
+	muhat[it->first] = mu;
+	// cluster-specific variance
+	double eps = 1e-6;
+	double tau = sqrt(eps*2.0/(gradient_cluster(mu+eps)-gradient_cluster(mu-eps)));
+	tauhat[it->first] = tau;
+	vec eta = this->X * vbeta;
+	vec etaD = this->XD * vbeta;
+	vec eta0(1,fill::zeros);
+	vec eta1(this->X.n_rows,fill::zeros);
+	if (this->delayed) {
+	  eta0 = this->X0 * vbeta;
+	  eta1 = this->X1 * vbeta;
+	}
+	double Lj = 0.0, L0j = 0.0;
+	for (int k=0; k<K; ++k) {
+	  double g = 0.0, g0 = 0.0;
+	  double bi = mu + sqrt(2.0)*tau*this->gauss_x(k);
+	  li_constraint lik, l0ik;
+	  if (left_trunc_not_recurrent) {
+	    this->delayed = false; 
+	    lik = Base::li(eta+Z*bi,etaD,eta0+Z0*bi,eta1+Z*bi);
+	    this->delayed = true; 
+	    l0ik = Base::li_left_truncated(eta0+Z0*bi);
+	    g0 = exp(sum(l0ik.li)+R::dnorm(bi,0.0,sigma,1));
+	    L0j += sqrt(2.0)*tau*g0*gauss_w(k)*exp(gauss_x(k)*gauss_x(k));
+	  } else {
+	    lik = Base::li(eta+Z*bi,etaD,eta0+Z0*bi,eta1+Z*bi);
+	  }
+	  g = exp(sum(lik.li)+R::dnorm(bi,0.0,sigma,1));
+	  Lj += sqrt(2.0)*tau*g*gauss_w(k)*exp(gauss_x(k)*gauss_x(k));
+	  constraint += lik.constraint;
+	}
+	ll += log(Lj);
+      }
+      resetDesign();
+      first = false;
+      return -(ll - constraint);
+    }
+    void resetDesign() {
+      this->X = full.X;
+      this->XD = full.XD;
+      this->bhazard = full.bhazard;
+      this->wt = full.wt;
+      this->event = full.event;
+      this->time = full.time;
+      this->X1 = full.X1;
+      this->X0 = full.X0;
+      this->wt0 = full.wt0;
+      this->which0 = full.which0;
+      this->Z = full_Z;
+      this->Z0 = full_Z0;
+    }
+    void clusterDesign(IndexMap::iterator it) {
+      clusterid = it->first;
+      uvec index = conv_to<uvec>::from(it->second);
+      this->X = full.X.rows(index);
+      this->XD = full.XD.rows(index);
+      this->X1 = full.X1.rows(index);
+      this->bhazard = full.bhazard(index);
+      this->wt = full.wt(index);
+      this->event = full.event(index);
+      this->time = full.time(index);
+      this->Z = full_Z(index);
+      this->Z0 = vec(1,fill::zeros);
+      if (this->delayed) {
+	uvec index0 = Base::map0f(index);
+	this->X0 = full.X0.rows(index0);
+	this->wt0 = full.wt0(index0);
+	this->Z0 = full_Z0(index0);
+	this->which0 = Base::which0f(index);
+      }
+    }
+    // log(g(bi))
+    double objective_cluster(double bi) {
+      vec vbeta = this->objective_cluster_beta; // nu=log(variance) is the last parameter in vbeta
+      double sigma = exp(0.5*vbeta(this->n-1)); // standard deviation
+      vbeta.resize(this->n - 1);
       vec eta = this->X * vbeta;
       vec etaD = this->XD * vbeta;
-      vec eta0 = this->X0 * vbeta;
-      vec eta1 = this->X1 * vbeta;
-      for (int k=0; k<K; ++k) {
-	double bi = sqrt(2.0)*sigma*this->gauss_x[k];
-	li_constraint lik = Base::li(eta+bi,etaD,eta0+bi,eta1+bi);
-	lijk.col(k) = lik.li;
-	constraint += lik.constraint;
+      vec eta0(1,fill::zeros);
+      vec eta1(this->X.n_rows,fill::zeros);
+      if (this->delayed) {
+	eta0 = this->X0 * vbeta;
+	eta1 = this->X1 * vbeta;
       }
-      double ll = 0.0;
-      for (IndexMap::iterator it=clusters.begin(); it!=clusters.end(); ++it) {
-	uvec index = conv_to<uvec>::from(it->second);
-	double Li = dot(exp(sum(lijk.rows(index),0)),wstar);
-	ll += log(Li);
-      }
-      // ll -= constraint;
-      return -ll;  
+      li_constraint lik = Base::li(eta+Z*bi,etaD,eta0+Z0*bi,eta1+Z*bi);
+      double ll = sum(lik.li) + R::dnorm(bi,0.0,sigma,1);
+      return -ll;
     }
-/// Another way for gradients
-/// gradient of objective
-vec gradient_new(vec beta) {
+    double gradient_cluster(double bi) {
+      vec vbeta = this->objective_cluster_beta; // nu=log(variance) is the last parameter in vbeta
+      double sigma = exp(0.5*vbeta(this->n-1)); // standard deviation
+      vbeta.resize(this->n - 1);
+      vec eta = this->X * vbeta;
+      vec etaD = this->XD * vbeta;
+      vec eta0(1,fill::zeros);
+      vec eta1(this->X1.n_rows,fill::zeros);
+      if (this->delayed) {
+	eta0 = this->X0 * vbeta;
+	eta1 = this->X1 * vbeta;
+      }
+      mat X = mat(Z); // mat(this->X.n_rows,1,fill::ones);
+      mat XD = mat(this->XD.n_rows,1,fill::zeros);
+      mat X0 = mat(Z0); // mat(this->X0.n_rows,1,fill::ones);
+      mat X1 = mat(Z); // mat(this->X1.n_rows,1,fill::ones);
+      gradli_constraint gradlik = Base::gradli(eta+Z*bi,etaD,eta0+Z0*bi,eta1+Z*bi,X,XD,X0,X1);
+      rowvec gradll = sum(gradlik.gradli,0) - bi/sigma/sigma;
+      return -gradll(0);
+    }
+    // double fdhessian(boost::function<double(double x)> f, double x, double eps = 1.0e-6) {
+    //   return (-f(x+2*eps)+16*f(x+eps)-30*f(x)+16*f(x-eps)-f(x-2*eps))/12.0/eps/eps;
+    // }
+    void calculate_modes_and_variances() {
+      this->objective_cluster_beta = this->bfgs.coef;
+      for (IndexMap::iterator it=clusters.begin(); it!=clusters.end(); ++it) {
+	clusterDesign(it);
+	modes[it->first] = Brent_fmin(-100.0,100.0,&(call_objective_cluster<This>),(void *) this,
+				      this->reltol);
+	// Abramowitz and Stegun 1972, p. 884
+	double bi = modes[it->first];
+	double eps = 1e-6;
+	double f1 = objective_cluster(bi+2*eps);
+	double f2 = objective_cluster(bi+eps);
+	double f3 = objective_cluster(bi);
+	double f4 = objective_cluster(bi-eps);
+	double f5 = objective_cluster(bi-2*eps);
+	double hessian = (-f1+16*f2-30*f3+16*f4-f5)/12.0/eps/eps;
+	variances[it->first] = 1.0/hessian;
+	variances[it->first] = eps*2.0/(gradient_cluster(bi+eps)-gradient_cluster(bi-eps));
+      }
+      resetDesign();
+    }
+    vec gradient(vec beta) {
+      return this->adaptive ? gradient_adaptive(beta) : gradient_nonadaptive(beta);
+    }
+    vec gradient_adaptive(vec beta) {
+      int n = beta.size();
+      this->objective_cluster_beta = beta; // for use by objective_cluster()
+      vec betastar = beta; // we use the last element as bi - is this a good idea?
+      vec vbeta(beta); // nu=log(variance) is the last parameter in beta; exp(nu)=sigma^2
+      double sigma = exp(0.5*vbeta(this->n-1)); // standard deviation
+      vbeta.resize(n-1);
+      int K = gauss_x.size(); // number of nodes
+      // rowvec dconstraint(n,fill::zeros); 
+      rowvec gradLi(n,fill::zeros);
+      for (IndexMap::iterator it=clusters.begin(); it!=clusters.end(); ++it) {
+	clusterDesign(it);
+	// cluster-specific modes and variances (calculated in the objective function)
+	double mu = muhat[it->first];
+	double tau = tauhat[it->first];
+	mat Zmain(Z); 
+	mat ZD(this->XD.n_rows,1,fill::zeros);
+	mat Z0main(Z0); 
+	mat Z1(Z); 
+	mat Xstar = join_horiz(this->X, Zmain); 
+	mat XDstar = join_horiz(this->XD, ZD); // assumes time-invariant random effects
+	mat X0star = join_horiz(this->X0, Z0main); 
+	mat X1star = join_horiz(this->X1, Z1);
+	double Lj = 0.0;
+	rowvec numerator(this->n,fill::zeros);
+	for (int k=0; k<K; ++k) {
+	  double bi = mu + sqrt(2.0)*tau*this->gauss_x(k);
+	  betastar[betastar.size()-1] = bi;
+	  vec etastar = Xstar * betastar;
+	  vec etaDstar = XDstar * betastar;
+	  vec eta0star = X0star * betastar;
+	  vec eta1star = X1star * betastar;
+	  li_constraint lik = Base::li(etastar,etaDstar,eta0star,eta1star);
+	  double g = exp(sum(lik.li) + R::dnorm(bi,0.0,sigma,1));
+	  gradli_constraint gradlik = Base::gradli(etastar, etaDstar, eta0star, eta1star,Xstar, XDstar, X0star, X1star);
+	  Lj += sqrt(2.0)*tau*g*gauss_w(k)*exp(gauss_x(k)*gauss_x(k));
+	  rowvec numeratorstar = sqrt(2.0)*tau*g*sum(gradlik.gradli,0)*gauss_w(k)*exp(gauss_x(k)*gauss_x(k));
+	  numerator(span(0,n-2)) += numeratorstar(span(0,n-2));
+	  numerator(n-1) += sqrt(2.0)*tau*gauss_w(k)*exp(gauss_x(k)*gauss_x(k))*g*(- 0.5 + bi*bi/2/sigma/sigma);
+	  // dconstraint += sum(gradlik.constraint,0);
+	}
+	gradLi += numerator/Lj;
+      }
+      vec gr(n,fill::zeros);
+      for (int i=0; i<n; i++) gr(i) = gradLi(i); // - dconstraint(i);
+      resetDesign();
+      return -gr;
+    }
+    vec gradient_nonadaptive(vec beta) {
 	int n = beta.size();
 	double sigma = exp(0.5*beta[n-1]);
-	mat Z(this->N,1,fill::ones);
+	mat Zmain(Z);
 	mat ZD(this->N,1,fill::zeros);
-	mat Z0(this->X0.n_rows,1,fill::ones);
-	mat Z1(this->X1.n_rows,1,fill::ones);
-	mat Xstar = join_horiz(this->X, Z); 
+	mat Z0main(Z0);
+	mat Z1(Z);
+	mat Xstar = join_horiz(this->X, Zmain); 
 	mat XDstar = join_horiz(this->XD, ZD); // assumes time-invariant random effects
-	mat X0star = join_horiz(this->X0, Z0); 
+	mat X0star = join_horiz(this->X0, Z0main); 
 	mat X1star = join_horiz(this->X1, Z1); 
 	int K = gauss_x.size(); // number of nodes
 	vec wstar = gauss_w/sqrt(datum::pi);
@@ -1243,98 +1635,36 @@ vec gradient_new(vec beta) {
 	}
 	// Last step to summarize all clusters 
 	rowvec grad = sum(rmult(gradLi,1/Li),0); // Rows of matrix is multiplied with elements of vector
-	if (this->bfgs.trace>0) {
-		Rprintf("fdgradient="); Rprint(this->fdgradient(beta)); 
-	}
+	// if (this->bfgs.trace>0) {
+	// 	Rprintf("fdgradient="); Rprint(this->fdgradient(beta)); 
+	// }
 	vec gr(n,fill::zeros);
 	for (int i=0; i<n; i++) gr(i) = grad(i); // - dconstraint(i);
 	return -gr;  
-}
-    vec gradient(vec beta) {
-      int n = beta.size();
-      double sigma = exp(0.5*beta[n-1]);
-      mat Z(this->N,1,fill::ones);
-      mat ZD(this->N,1,fill::zeros);
-      mat Z0(this->X0.n_rows,1,fill::ones);
-      mat Z1(this->X1.n_rows,1,fill::ones);
-      mat Xstar = join_horiz(this->X, Z); 
-      mat XDstar = join_horiz(this->XD, ZD); // assumes time-invariant random effects
-      mat X0star = join_horiz(this->X0, Z0); 
-      mat X1star = join_horiz(this->X1, Z1); 
-      int K = gauss_x.size(); // number of nodes
-      vec wstar = gauss_w/sqrt(datum::pi);
-      int G = clusters.size();
-      vec Li(G,fill::zeros);
-      mat gradLi(G,n,fill::zeros);
-      vec betastar = beta;
-      rowvec dconstraint(n,fill::zeros); 
-      for (int k=0; k<K; ++k) {
-	double bi = sqrt(2.0)*sigma*gauss_x[k];
-	betastar[betastar.size()-1] = bi;
-	vec etastar = Xstar * betastar;
-	vec etaDstar = XDstar * betastar;
-	vec eta0star = X0star * betastar;
-	vec eta1star = X1star * betastar;
-	li_constraint lik = Base::li(etastar, etaDstar, eta0star, eta1star);
-	gradli_constraint gradlik = Base::gradli(etastar, etaDstar, eta0star, eta1star,
-						 Xstar, XDstar, X0star, X1star);
-	// adjust the last column of the gradient to account for the variance components:
-	// chain rule: d lik/d bi * d bi/d nu where bi = sqrt(2)*exp(nu/2)*x_k
-	gradlik.gradli.col(gradlik.gradli.n_cols-1) *= bi*0.5;
-	dconstraint += sum(gradlik.constraint,0); // ignores clustering??
-	int g = 0;
-	for (IndexMap::iterator it=clusters.begin(); it!=clusters.end(); ++it, ++g) {
-	  uvec index = conv_to<uvec>::from(it->second);
-	  double Lgk = exp(sum(lik.li(index)));
-	  Li(g) += Lgk*wstar[k];
-	  gradLi.row(g) += wstar[k]*Lgk*sum(gradlik.gradli.rows(index),0);
-	}
-      }
-      rowvec grad = sum(rmult(gradLi,1/Li),0);
-      if (this->bfgs.trace>0) {
-	Rprintf("fdgradient="); Rprint(this->fdgradient(beta)); 
-      }
-      vec gr(n,fill::zeros);
-      for (int i=0; i<n; i++) gr(i) = grad(i); // - dconstraint(i);
-      return -gr;  
     }
     bool feasible(vec beta) {
       vec coef(beta);
       coef.resize(beta.size()-1);
       return Base::feasible(coef);
     }
-    void optimWithConstraint(NumericVector init) {
-      bool satisfied;
-      int n = init.size();
-      if (this->bfgs.trace > 0) 
-	Rprintf("Starting optimization\n");
-      do {
-	this->bfgs.optim(&optimfunction<This>, &optimgradient<This>, init, (void *) this);
-	vec vcoef(&this->bfgs.coef[0],n); 
-	satisfied = feasible(vcoef % this->parscale);
-	if (!satisfied) this->kappa *= 2.0;   
-      } while ((!satisfied) && this->kappa < 1.0e3);
+    SEXP return_modes() {
+      calculate_modes_and_variances();
+      return wrap(modes);
     }
-    void optimWithConstraintNM(NumericVector init) {
-      bool satisfied;
-      NelderMead2 nm;
-      nm.hessianp = false;
-      nm.parscale = this->parscale;
-      do {
-	nm.optim(&optimfunction<This>, this->init, (void *) this);
-	vec vcoef(&this->bfgs.coef[0],this->n); 
-	satisfied = feasible(vcoef % this->parscale);
-	if (!satisfied) this->kappa *= 2.0;   
-      } while ((!satisfied) && this->kappa < 1.0e3);
-      nm.hessian = nm.calc_hessian(&optimfunction<This>, (void *) this);
-      this->bfgs.coef = nm.coef;
-      this->bfgs.hessian = nm.hessian;
+    SEXP return_variances() {
+      calculate_modes_and_variances();
+      return wrap(variances);
     }
-    IndexMap clusters, cluster_events, cluster_event_indices;
-    vec gauss_x, gauss_w;
+    OPTIM_FUNCTIONS;
+    IndexMap clusters;
+    vec gauss_x, gauss_w, full_Z, full_Z0, Z, Z0;
+    BaseData full;
+    Doubles modes, variances;
+    vec objective_cluster_beta;
+    Doubles muhat, tauhat;
+    int clusterid;
+    bool adaptive, first, recurrent;
   };
-
-
 
   template<class T>
   SEXP stpm2_model_output_(SEXP args) {
@@ -1346,17 +1676,27 @@ vec gradient_new(vec beta) {
       model.pre_process();
       model.optimWithConstraint(model.init);
       model.bfgs.hessian = model.bfgs.calc_hessian(&optimgradient<T>, (void *) &model);
+      // model.bfgs.hessian = model.calcHessian(model.bfgs.coef);
       model.post_process();
       return List::create(_("fail")=model.bfgs.fail, 
 			  _("coef")=wrap(model.bfgs.coef),
-			  _("hessian")=wrap(model.bfgs.hessian));
+			  _("hessian")=wrap(model.bfgs.hessian),
+			  _("kappa")=wrap(model.kappa));
     }
     else if (return_type == "objective")
       return wrap(model.objective(beta));
-    else if (return_type == "gradient")
+    else if (return_type == "gradient") {
+      model.objective(beta); // only needed for updating NormalSharedFrailty
       return wrap(model.gradient(beta));
+    }
     else if (return_type == "feasible")
       return wrap(model.feasible(beta));
+    else if (return_type == "modes")
+      return model.return_modes();
+    else if (return_type == "variances")
+      return model.return_variances();
+    else if (return_type == "li")
+      return wrap(model.li(model.X*beta, model.XD*beta, model.X0*beta, model.X1*beta).li);
     else {
       REprintf("Unknown return_type.\n");
       return wrap(-1);
@@ -1378,14 +1718,22 @@ vec gradient_new(vec beta) {
       return wrap(model.objective(beta));
     else if (return_type == "objective0")
       return wrap(model.objective0(beta));
-    else if (return_type == "gradient")
+    else if (return_type == "gradient") {
+      model.objective(beta);
       return wrap(model.gradient(beta));
+    }
     else if (return_type == "gradient0")
       return wrap(model.gradient0(beta));
     else if (return_type == "constraint")
       return wrap(model.feasible(beta));
     else if (return_type == "feasible")
       return wrap(model.feasible(beta));
+    else if (return_type == "li")
+      return wrap(model.li(model.X*beta, model.XD*beta, model.X0*beta, model.X1*beta).li);
+    else if (return_type == "modes")
+      return model.return_modes();
+    else if (return_type == "variances")
+      return model.return_variances();
     else {
       REprintf("Unknown return_type.\n");
       return wrap(-1);
@@ -1393,91 +1741,25 @@ vec gradient_new(vec beta) {
   }
   RcppExport SEXP model_output(SEXP args) {
     List list = as<List>(args);
-    std::string link = as<std::string>(list["link"]);
     std::string type = as<std::string>(list["type"]);
     if (type=="stpm2") {
-      if (link == "PH")
-	return stpm2_model_output_<Stpm2<LogLogLink> >(args);
-      else if (link == "PO")
-	return stpm2_model_output_<Stpm2<LogitLink> >(args);
-      else if (link == "AH")
-	return stpm2_model_output_<Stpm2<LogLink> >(args);
-      else if (link == "probit")
-	return stpm2_model_output_<Stpm2<ProbitLink> >(args);
-      else {
-	REprintf("Unknown link function.\n");
-	return wrap(-1);
-      }
+      return stpm2_model_output_<Stpm2>(args);
     }
     else if (type=="pstpm2") {
-      if (link == "PH")
-	return pstpm2_model_output_<Pstpm2<Stpm2<LogLogLink>,SmoothLogH> >(args);
-      else if (link == "PO")
-	return pstpm2_model_output_<Pstpm2<Stpm2<LogitLink>,SmoothLogH> >(args);
-      else if (link == "AH")
-	return pstpm2_model_output_<Pstpm2<Stpm2<LogLink>,SmoothLogH> >(args);
-      else if (link == "probit")
-	return pstpm2_model_output_<Pstpm2<Stpm2<ProbitLink>,SmoothLogH> >(args);
-      else {
-	REprintf("Unknown link function.\n");
-	return wrap(-1);
-      }
+      return pstpm2_model_output_<Pstpm2<Stpm2,SmoothLogH> >(args);
     }
     else if (type=="stpm2_gamma_frailty") {
-      if (link == "PH")
-	return stpm2_model_output_<GammaSharedFrailty<Stpm2<LogLogLink> > >(args);
-      else if (link == "PO")
-	return stpm2_model_output_<GammaSharedFrailty<Stpm2<LogitLink> > >(args);
-      else if (link == "AH")
-	return stpm2_model_output_<GammaSharedFrailty<Stpm2<LogLink> > >(args);
-      else if (link == "probit")
-	return stpm2_model_output_<GammaSharedFrailty<Stpm2<ProbitLink> > >(args);
-      else {
-	REprintf("Unknown link function.\n");
-	return wrap(-1);
-      }
+      return stpm2_model_output_<GammaSharedFrailty<Stpm2> >(args);
     }
     else if (type=="pstpm2_gamma_frailty") {
-      if (link == "PH")
-	return pstpm2_model_output_<Pstpm2<GammaSharedFrailty<Stpm2<LogLogLink> >,SmoothLogH> >(args);
-      else if (link == "PO")
-	return pstpm2_model_output_<Pstpm2<GammaSharedFrailty<Stpm2<LogitLink> >,SmoothLogH> >(args);
-      else if (link == "AH")
-	return pstpm2_model_output_<Pstpm2<GammaSharedFrailty<Stpm2<LogLink> >,SmoothLogH> >(args);
-      else if (link == "probit")
-	return pstpm2_model_output_<Pstpm2<GammaSharedFrailty<Stpm2<ProbitLink> >,SmoothLogH> >(args);
-      else {
-	REprintf("Unknown link function.\n");
-	return wrap(-1);
-      }
+      return pstpm2_model_output_<Pstpm2<GammaSharedFrailty<Stpm2>,SmoothLogH> >(args);
     }
     else if (type=="stpm2_normal_frailty") {
-      if (link == "PH")
-	return stpm2_model_output_<NormalSharedFrailty<Stpm2<LogLogLink> > >(args);
-      else if (link == "PO")
-	return stpm2_model_output_<NormalSharedFrailty<Stpm2<LogitLink> > >(args);
-      else if (link == "AH")
-	return stpm2_model_output_<NormalSharedFrailty<Stpm2<LogLink> > >(args);
-      else if (link == "probit")
-	return stpm2_model_output_<NormalSharedFrailty<Stpm2<ProbitLink> > >(args);
-      else {
-	REprintf("Unknown link function.\n");
-	return wrap(-1);
-      }
+      return stpm2_model_output_<NormalSharedFrailty<Stpm2> >(args);
     }
     else if (type=="pstpm2_normal_frailty") {
-      if (link == "PH")
-	return pstpm2_model_output_<Pstpm2<NormalSharedFrailty<Stpm2<LogLogLink> >,SmoothLogH> >(args);
-      else if (link == "PO")
-	return pstpm2_model_output_<Pstpm2<NormalSharedFrailty<Stpm2<LogitLink> >,SmoothLogH> >(args);
-      else if (link == "AH")
-	return pstpm2_model_output_<Pstpm2<NormalSharedFrailty<Stpm2<LogLink> >,SmoothLogH> >(args);
-      else if (link == "probit")
-	return pstpm2_model_output_<Pstpm2<NormalSharedFrailty<Stpm2<ProbitLink> >,SmoothLogH> >(args);
-      else {
-	REprintf("Unknown link function.\n");
-	return wrap(-1);
-      }
+      // order is important here
+      return pstpm2_model_output_<Pstpm2<NormalSharedFrailty<Stpm2>,SmoothLogH> >(args);
     }
     else {
       REprintf("Unknown model type.\n");
@@ -1485,15 +1767,12 @@ vec gradient_new(vec beta) {
     }
   }
 
-
   // Proof of concept for a Weibull cure model
-  
   struct CureModel {
     int n0, n1, n2;
     mat Xshape, Xscale, Xcure;
     vec time, status;
   };
-
   double fminfn_cureModel(int n, double * beta, void *ex) {
     double ll = 0.0;
     CureModel * data = (CureModel *) ex;
@@ -1509,7 +1788,6 @@ vec gradient_new(vec beta) {
     R_CheckUserInterrupt();  /* be polite -- did the user hit ctrl-C? */
     return -ll;
   }
-
   RcppExport SEXP fitCureModel(SEXP stime, SEXP sstatus, SEXP sXshape,
 			  SEXP sXscale, SEXP sXcure, SEXP sbeta) {
     mat Xshape = as<mat>(sXshape);
@@ -1522,22 +1800,16 @@ vec gradient_new(vec beta) {
     int n1=n0+Xscale.n_cols;
     int n2=n1+Xcure.n_cols;
     CureModel data = {n0,n1,n2,Xshape,Xscale,Xcure,time,status};
-    
     NelderMead nm;
     nm.reltol = 1.0e-8;
     nm.maxit = 1000;
     nm.optim(& fminfn_cureModel, init, (void *) &data);
-
     for (int i = 0; i<nm.coef.size(); ++i)
       init[i] = nm.coef[i]; // clone
-    
     return List::create(_("Fmin")=nm.Fmin, 
 			_("coef")=wrap(init),
 			_("fail")=nm.fail,
 			_("hessian")=wrap(nm.hessian));
   }
-
-  // R CMD INSTALL ~/src/R/microsimulation
-  // R -q -e "require(microsimulation); .Call('test_nmmin',1:2,PACKAGE='microsimulation')"
 
 } // anonymous namespace
