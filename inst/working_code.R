@@ -18,6 +18,60 @@
 ##   require(bbmle)
 ## }
 
+## 2017-06-21 
+## Verify: the choice of basis dimension (default: k=10) for penalized regression splines is not sensitive to estimates
+## Adjusted by a constant coefficient (e.g. alpha=2) to correct potential overfitting by GCV for lambda
+## alpha = 1.4 suggested by Kim and Gu (2004)
+library(rstpm2)
+## k = 7
+pfit7 <- pstpm2(Surv(rectime, censrec==1) ~ hormon, data = brcancer, smooth.formula = ~ s(log(rectime), k=7), alpha=2)
+plot(pfit7, newdata = data.frame(hormon=0), type="hazard")
+
+## k = 27
+pfit27 <- pstpm2(Surv(rectime, censrec==1) ~ hormon, data = brcancer, smooth.formula = ~ s(log(rectime), k=27), alpha=2)
+plot(pfit27, newdata = data.frame(hormon=0), type="hazard")
+
+## Estimated effective degree of freedom (EDF)
+pfit7@edf  ## 5.36
+pfit27@edf ## 5.96
+
+
+require(coxme)
+
+## Fix error in code for gradli
+library(rstpm2)
+data(brcancer)
+fit <- stpm2(Surv(rectime,censrec) ~ hormon,data=transform(brcancer,censrec=1))
+fit <- stpm2(Surv(rectime,censrec==1) ~ hormon,data=brcancer,cure=TRUE)
+fit <- stpm2(Surv(rectime,censrec==1) ~ hormon,data=brcancer)
+
+plot(fit,newdata=data.frame(hormon=1),type="uncured",exposed=function(data) transform(data,rectime=2500))
+X <- fit@args$X
+XD <- fit@args$XD
+args <- fit@args
+beta.est <- coef(fit)
+eta <- as.vector(X %*% beta.est)
+etaD <- as.vector(XD %*% beta.est)
+link <- switch(fit@args$link,PH=rstpm2:::link.PH,PO=rstpm2:::link.PO)
+h <- link$h(eta,etaD)  # - as.vector(predict(fit, type="haz")) ## Ok!
+H <- link$H(eta)  #- as.vector(predict(fit, type="cumhaz")) ## Ok!
+gradh <- as.matrix(link$gradh(eta,etaD, args))
+gradH <- as.matrix(link$gradH(eta, args))
+
+gradli <- residuals(fit, type="gradli") ## n*npar
+dim(gradli)
+gradli2 <- gradH - ifelse(fit@args$event,1/h,0)*gradh
+head(gradli + gradli2)
+
+
+## Gamma frailty
+refresh
+require(rstpm2)
+brcancer2 <- transform(brcancer, id=rep(1:(nrow(brcancer)/2),each=2))
+fit <- stpm2(Surv(rectime,censrec==1)~1,data=brcancer2, cluster=brcancer2$id, logtheta=-6)
+summary(fit)
+plot(fit,newdata=data.frame(one=1),type="margsurv")
+
 # Aranda-Ordaz link
 refresh
 require(rstpm2)
@@ -27,6 +81,184 @@ summary(fit <- stpm2(Surv(rectime,censrec==1)~1,data=brcancer,link="AO", df=3)) 
 summary(fit <- stpm2(Surv(rectime,censrec==1)~1,data=brcancer,link="PO", df=3))
 summary(fit <- stpm2(Surv(rectime,censrec==1)~1,data=brcancer,link="AO", theta.AO=1, df=3)) # Same: OK
 summary(fit <- pstpm2(Surv(rectime,censrec==1)~1,data=brcancer,link="AO", theta.AO=0.5))
+
+refresh
+require(rstpm2)
+## PH
+summary(fit <- stpm2(Surv(rectime,censrec==1)~hormon,data=brcancer,link="PH", df=3))
+predict(fit, newdata=transform(brcancer,rectime=1000),type="meansurv",keep.attributes=FALSE,se.fit=TRUE,use.gr=F)
+predict(fit, newdata=transform(brcancer,rectime=1000),type="meansurv",keep.attributes=FALSE,se.fit=TRUE,use.gr=T)
+plot(fit,newdata=transform(brcancer,hormon=1),type="meansurv",times=seq(10,1500,by=10))
+plot(fit,newdata=transform(brcancer,hormon=2),type="meansurv",times=seq(10,1500,by=10),lty=2,add=TRUE)
+
+newd <- merge(transform(brcancer,rectime=NULL), data.frame(rectime=c(500,1000)))
+unlist(predict(fit,newdata=newd,type="af",exposed=function(data) transform(data,hormon=1),keep.attributes=FALSE,se.fit=TRUE) -
+       predict(fit,newdata=newd,type="af",exposed=function(data) transform(data,hormon=1),keep.attributes=FALSE,se.fit=TRUE,use.gr=FALSE))
+
+system.time(plot(fit,type="af",exposed=function(data) transform(data,hormon=1),recent=TRUE))
+system.time(plot(fit,type="af",exposed=function(data) transform(data,hormon=1),recent=FALSE))
+plot(fit,newdata=NULL,type="meansurv",ci=F)
+plot(fit,newdata=NULL,type="meansurvdiff",exposed=function(data) transform(data,hormon=1))
+
+plot(fit,newdata=data.frame(hormon=1),type="surv",ci=F)
+plot(fit,newdata=data.frame(hormon=1),type="fail",ci=T)
+
+unlist(predict(fit,newdata=newd,type="meansurvdiff",exposed=function(data) transform(data,hormon=1),keep.attributes=FALSE,se.fit=TRUE) -
+      predict(fit,newdata=newd,type="meansurvdiff",exposed=function(data) transform(data,hormon=1),keep.attributes=FALSE,se.fit=TRUE,use.gr=FALSE))
+unlist(predict(fit,newdata=newd,type="meansurv",keep.attributes=FALSE,se.fit=TRUE)-
+       predict(fit,newdata=newd,type="meansurv",keep.attributes=FALSE,se.fit=TRUE,use.gr=FALSE))
+
+
+## comparison with AF
+## Example 1: clustered data with frailty U
+require(AF)
+set.seed(12345)
+expit <- function(x) 1 / (1 + exp( - x))
+n <- 100
+m <- 2
+alpha <- 1.5
+eta <- 1
+phi <- 0.5
+beta <- 1
+id <- rep(1:n,each=m)
+U <- rep(rgamma(n, shape = 1 / phi, scale = phi), each = m)
+Z <- rnorm(n * m)
+X <- rbinom(n * m, size = 1, prob = expit(Z))
+## Reparametrize scale as in rweibull function
+weibull.scale <- alpha / (U * exp(beta * X)) ^ (1 / eta)
+t <- rweibull(n * m, shape = eta, scale = weibull.scale)
+## Right censoring
+cen <- runif(n * m, 0, 10)
+delta <- as.numeric(t < cen)
+t <- pmin(t, cen)
+d <- data.frame(t, delta, X, Z, id)
+
+
+require(rstpm2)
+fit2 <- stpm2(formula = Surv(t, delta) ~ X + Z + X * Z, data = d, df=1, cluster=d$id, smooth.formula=~log(t))
+predict(fit2, type="af", newdata=transform(d,t=1),exposed=function(data) transform(data, X=0), se.fit=TRUE)
+plot(fit2, type="af", exposed=function(data) transform(data, X=0))
+plot(fit2, type="meansurvdiff", exposed=function(data) transform(data, X=0))
+plot(fit2, type="meansurv")
+
+fit3 <- pstpm2(formula = Surv(t, delta) ~ X + Z + X * Z, data = d, df=1, cluster=d$id)
+predict(fit3, type="af", newdata=transform(d,t=1),exposed=function(data) transform(data, X=0), se.fit=TRUE)
+plot(fit3, type="meansurv")
+
+predict(fit2, newdata=transform(d,t=1), type="meansurv")
+
+## check analytical gradients for margsurv and marghaz
+predict(fit2, newdata=data.frame(t=1,X=1,Z=1), type="margsurv", use.gr=TRUE, se.fit=TRUE)-predict(fit2, newdata=data.frame(t=1,X=1,Z=1), type="margsurv", use.gr=FALSE, se.fit=TRUE)
+predict(fit2, newdata=data.frame(t=1,X=1,Z=1), type="marghaz", use.gr=TRUE, se.fit=TRUE)-predict(fit2, newdata=data.frame(t=1,X=1,Z=1), type="marghaz", use.gr=FALSE, se.fit=TRUE)
+predict(fit2, newdata=data.frame(t=1,X=1,Z=1), type="hazard", use.gr=TRUE, se.fit=TRUE)-predict(fit2, newdata=data.frame(t=1,X=1,Z=1), type="hazard", use.gr=FALSE, se.fit=TRUE)
+
+require(boot)
+meansurv <- function(data,index) predict(fit2, newdata=transform(data[index,,drop=FALSE],t=1), type="meansurv")
+meansurv(d,TRUE)
+boot1 <- boot(d, meansurv, R=1000)
+boot.ci(boot1)
+
+require(rstpm2)
+fit <- stpm2(formula = Surv(t, delta) ~ X + Z + X * Z, data = d, df=1)
+diag(vcov(fit))
+fit <- stpm2(formula = Surv(t, delta) ~ X + Z + X * Z, data = d, frailty=FALSE, cluster=d$id, df=1)
+diag(vcov(fit))
+fit <- stpm2(formula = Surv(t, delta) ~ X + Z + X * Z, data = d, cluster=d$id, df=1)
+diag(vcov(fit))
+##
+fit <- stpm2(formula = Surv(t, delta) ~ X + Z + X * Z, data = d, cluster = d$id, df=1)
+predict(fit,type="af",newdata=transform(d,t=1),exposed=function(data) transform(data,X=0),keep.attributes=FALSE,se.fit=TRUE) 
+fit <- stpm2(formula = Surv(t, delta) ~ X + Z + X * Z, data = d, cluster = d$id, df=4)
+predict(fit,type="af",newdata=transform(d,t=1),exposed=function(data) transform(data,X=0),keep.attributes=FALSE,se.fit=TRUE)
+
+fit <- stpm2(formula = Surv(t, delta) ~ X + Z + X * Z, data = d, cluster=d$id, df=1)
+predict(fit,type="af",newdata=transform(d,t=1),exposed=function(data) transform(data,X=0),keep.attributes=FALSE,se.fit=TRUE) 
+
+## Fit a frailty object
+library(stdReg)
+fit <- stdReg::frailty(formula = Surv(t, delta) ~ X + Z + X * Z, data = d, clusterid = "id")
+summary(fit)
+## Estimate the attributable fraction from the fitted frailty model
+time <- c(seq(from = 0.2, to = 1, by = 0.2))
+time <- 1
+## debug(AFfrailty)
+AFfrailty_est <- AFfrailty(object = fit, data = d, exposure = "X", times = time, clusterid = "id")
+AFfrailty_est
+##AF:::summary.AF(AFfrailty_est)
+
+
+
+
+
+## tvc for Maarten Coemans
+require(rstpm2)
+brcancer <- transform(brcancer, x1c=x1-mean(x1))
+summary(fit.tvc <- stpm2(Surv(rectime,censrec==1)~ hormon+x1c, data=brcancer, df=3,  tvc=list(hormon=2,x1c=2)))
+plot(fit.tvc,newdata=data.frame(hormon=0,x1c=-10),type="hr", var="hormon")
+plot(fit.tvc,newdata=data.frame(hormon=0,x1c=+10),type="hr", var="hormon", add=TRUE,ci=FALSE,line.col=2)
+## same model
+summary(fit.tvc <- stpm2(Surv(rectime,censrec==1)~ hormon+x1c, data=brcancer,
+                         smooth.formula = ~ns(log(rectime),df=3)+hormon:ns(log(rectime),df=2)+x1c:ns(log(rectime),df=2)))
+## and again...
+summary(fit.tvc <- stpm2(Surv(rectime,censrec==1)~ x1c, data=brcancer,
+                         smooth.formula = ~ns(log(rectime),df=3)+hormon:ns(log(rectime),df=3,intercept=TRUE)+x1c:ns(log(rectime),df=2)))
+## new model with time different time transformation for the TVCs
+summary(fit.tvc <- stpm2(Surv(rectime,censrec==1)~ hormon+x1c, data=brcancer,
+                         smooth.formula = ~ns(log(rectime),df=3)+hormon:ns(rectime,df=2)+x1c:ns(rectime,df=2)))
+plot(fit.tvc,newdata=data.frame(hormon=0,x1c=-10),type="hr", var="hormon")
+plot(fit.tvc,newdata=data.frame(hormon=0,x1c=+10),type="hr", var="hormon", add=TRUE,ci=FALSE,line.col=2)
+##
+## not including the main effect and no intercept is not the same
+summary(fit.tvc <- stpm2(Surv(rectime,censrec==1)~ x1c, data=brcancer,
+                         smooth.formula = ~ns(log(rectime),df=3)+hormon:ns(log(rectime),df=2)+x1c:ns(log(rectime),df=2)))
+
+## Standardised survival
+require(rstpm2)
+plot.meansurv <- function(x, y=NULL, times=NULL, newdata=NULL, add=FALSE, ci=!add, rug=!add, recent=FALSE,
+                          xlab=NULL, ylab="Mean survival", lty=1, line.col=1, ci.col="grey", ...) {
+    if (is.null(times)) stop("plot.meansurv: times argument should be specified")
+    if (is.null(newdata)) newdata <- x@data
+    times <- times[times !=0]
+    if (recent) {
+        newdata <- do.call("rbind",
+                           lapply(times, 
+                                  function(time) {
+                                      newdata[[x@timeVar]] <- newdata[[x@timeVar]]*0+time
+                                      newdata
+                                  }))
+        pred <- predict(x, newdata=newdata, type="meansurv", se.fit=ci) # requires recent version
+        pred <- if (ci) rbind(c(Estimate=1,lower=1,upper=1),pred) else c(1,pred)
+    } else {
+        pred <- lapply(times, 
+                       function(time) {
+                           newdata[[x@timeVar]] <- newdata[[x@timeVar]]*0+time
+                           predict(x, newdata=newdata, type="meansurv", se.fit=ci)
+                       })
+        pred <- if (ci) rbind(c(Estimate=1,lower=1,upper=1),do.call("rbind", pred)) else c(1,unlist(pred))
+        }
+    times <- c(0,times)
+    if (is.null(xlab)) xlab <- deparse(x@timeExpr)
+    if (!add) matplot(times, pred, type="n", xlab=xlab, ylab=ylab, ...)
+    if (ci) {
+        polygon(c(times,rev(times)),c(pred$lower,rev(pred$upper)),col=ci.col,border=ci.col)
+        lines(times,pred$Estimate,col=line.col,lty=lty)
+    } else {
+        lines(times,pred,col=line.col,lty=lty)
+    }
+    if (rug) {
+        Y <- x@y
+        eventTimes <- Y[Y[,ncol(Y)]==1,ncol(Y)-1]
+        rug(eventTimes,col=line.col)
+    }
+    return(invisible(y))
+}
+brcancer <- transform(brcancer, x1c=x1-mean(x1))
+summary(fit.tvc <- stpm2(Surv(rectime,censrec==1)~ hormon+x1c, data=brcancer, df=3,  tvc=list(hormon=2,x1c=2)))
+times <- seq(0,3000,by=100)
+plot.meansurv(fit.tvc, newdata=transform(brcancer, hormon=1), times=times,
+              ylim=c(0.2,1))
+plot.meansurv(fit.tvc, times=times, newdata=transform(brcancer, hormon=0), line.col=2, add=TRUE)
+
 
 ## Examples using ns() for covariates - this was buggy.
 refresh
@@ -129,6 +361,11 @@ fit <- pstpm2(Surv(rectime,censrec==1)~1,data=brcancer,link="AH",
 plot(fit,newdata=data.frame(hormon=0),type="haz")
 plot(fit,newdata=data.frame(hormon=1),add=TRUE,lty=2,type="haz")
 
+## test robust estimators from penalized models
+## most spline coefficients become statistically significant
+require(rstpm2)
+summary(pstpm2(Surv(rectime/365,censrec==1)~hormon,data=brcancer,robust=FALSE))
+summary(pstpm2(Surv(rectime/365,censrec==1)~hormon,data=brcancer,robust=TRUE))
 
 ## robust standard errors for clustered data
 refresh
@@ -139,7 +376,12 @@ fit <- stpm2(Surv(rectime,censrec==1)~1,data=brcancer)
 summary(fit)
 fit <- stpm2(Surv(rectime,censrec==1)~1,data=brcancer, cluster=brcancer2$id, robust=TRUE)
 summary(fit)
-
+##
+require(rstpm2)
+brcancer2 <- transform(brcancer, id=rep(1:(nrow(brcancer)/2),each=2))
+fit <- stpm2(Surv(rectime,censrec==1)~1,data=brcancer, cluster=brcancer2$id)
+summary(fit)
+predict(fit,type="gradli")
 
 
 
@@ -220,19 +462,194 @@ summary(fit0 <- stpm2(Surv(startTime,rectime,censrec==1)~hormon,data=brcancer2,
                      optimiser="NelderMead",
                      smooth.formula=~nsx(log(rectime),df=3,stata=TRUE)))
 
-refresh
-
 require(foreign)
 require(rstpm2)
 stmixed <- read.dta("http://fmwww.bc.edu/repec/bocode/s/stmixed_example2.dta")
 stmixed2 <- transform(stmixed, start = ifelse(treat,stime/2,0))
+summary(r2 <- stpm2(Surv(stime,event)~treat,data=stmixed2,cluster=stmixed$trial,RandDist="LogN",df=3,Z=~treat-1,adaptive=TRUE,optimiser="NelderMead"))
+summary(r2 <- stpm2(Surv(stime,event)~treat,data=stmixed2,cluster=stmixed$trial,RandDist="LogN",df=3,Z=~treat-1,adaptive=TRUE))
+
+## non-adaptive
+system.time(print(summary(r2 <- stpm2(Surv(stime,event)~treat,data=stmixed2,cluster=stmixed$trial,RandDist="LogN",df=3,Z=~treat,adaptive=FALSE,nodes=20,optimiser="NelderMead")))) # slow and gradients not close to zero
+system.time(print(summary(r2 <- stpm2(Surv(stime,event)~treat,data=stmixed2,cluster=stmixed$trial,RandDist="LogN",df=3,Z=~treat,nodes=20,adaptive=FALSE)))) # gradients close to zero
+
+## random intercept and random slope with 20 nodes
+summary(r2 <- stpm2(Surv(stime,event)~treat,data=stmixed2,cluster=stmixed$trial,RandDist="LogN",df=3,Z=~treat,nodes=20,adaptive=FALSE)) 
+summary(r2 <- stpm2(Surv(stime,event)~treat,data=stmixed2,cluster=stmixed$trial,RandDist="LogN",df=3,Z=~treat,adaptive=FALSE,nodes=20)) # gradients close to zero
+
+## Simple examples with no random effects and with a random intercept (check: deviances)
+summary(r2 <- stpm2(Surv(stime,event)~treat,data=stmixed,df=3))
+summary(r2 <- stpm2(Surv(stime,event)~treat,data=stmixed,cluster=stmixed$trial,RandDist="LogN",df=3,Z=~treat-1))
+
+## check modes and sqrttau
+args <- r2@args
+args$return_type <- "modes"
+.Call("model_output", args, package="rstpm2")
+args$return_type <- "variances" # fudge
+.Call("model_output", args, package="rstpm2")
+
+
+## check gradients
+args <- r2@args
+args$return_type <- "gradient"
+.Call("model_output", args, package="rstpm2")
+fdgrad <- function(obj,eps=1e-6) {
+    args <- obj@args
+    args$return_type <- "objective"
+    sapply(1:length(args$init), function(i) {
+        largs <- args
+        largs$init[i] <- args$init[i]+eps
+        f1 <- .Call("model_output", largs, package="rstpm2")
+        largs$init[i] <- args$init[i]-eps
+        f2 <- .Call("model_output", largs, package="rstpm2")
+        data.frame(f1,f2,gradient=(f1-f2)/2.0/eps)
+    })
+}
+fdgrad(r2,1e-3)
+
+
+## random intercept and random slope
+summary(r2 <- stpm2(Surv(stime,event)~treat,data=stmixed2,cluster=stmixed$trial,RandDist="LogN",df=3,Z=~treat))
+
 summary(stpm2(Surv(start,stime,event)~treat,data=stmixed2))
 summary(r2 <- stpm2(Surv(stime,event)~treat,data=stmixed2,cluster=stmixed$trial,RandDist="LogN"))
-
+##
 summary(r2 <- pstpm2(Surv(stime,event)~treat,data=stmixed2,cluster=stmixed$trial,RandDist="LogN"))
+##
+summary(r2 <- stpm2(Surv(stime,event)~treat+factor(trial),data=stmixed2,cluster=stmixed$trial,RandDist="LogN",Z=~treat-1))
+##
+summary(r2 <- pstpm2(Surv(stime,event)~treat+factor(trial),data=stmixed2,cluster=stmixed$trial,RandDist="LogN",Z=~treat-1))
 
-system.time(summary(r2 <- stpm2(Surv(stime,event)~treat+factor(trial),data=stmixed2,cluster=stmixed$trial,RandDist="LogN",Z=~treat-1)))
-system.time(summary(r2 <- pstpm2(Surv(stime,event)~treat+factor(trial),data=stmixed2,cluster=stmixed$trial,RandDist="LogN",Z=~treat-1)))
+## gradients for RE parameters
+require(expm)
+link.PH <- list(link=function(S) log(-log(S)),
+                ilink=function(eta) exp(-exp(eta)),
+                h=function(eta,etaD) etaD*exp(eta),
+                H=function(eta) exp(eta),
+                gradh=function(eta,etaD,obj) obj$XD*exp(eta)+obj$X*etaD*exp(eta),
+                gradH=function(eta,obj) obj$X*exp(eta))
+link.AH <- list(link=function(S) -log(S),
+                ilink=function(eta) exp(-eta),
+                h=function(eta,etaD) etaD,
+                H=function(eta) eta,
+                gradh=function(eta,etaD,obj) obj$XD,
+                gradH=function(eta,obj) obj$X)
+corrtrans <- function(x) (1-exp(-x)) / (1+exp(-x))
+l <- function(gamma=c(log(.3),log(.4),0.5)) {
+    ## initially assume an additive model
+    H <- function(eta) eta
+    h <- function(eta,etaD) etaD
+    delta <- 1
+    eta <- 1
+    etaD <- 2
+    Z <- c(1,2)
+    d <- c(1,1)
+    mode <- c(1,2)
+    ## define sqrtmat
+    var <- exp(gamma[c(1,2)])
+    rho <- corrtrans(gamma[3])
+    cov <- rho*sqrt(var[1]*var[2])
+    Sigma <- matrix(c(var[1],cov,cov,var[2]),2,2)
+    ## SqrtSigma <- chol(Sigma)
+    SqrtSigma <- sqrtm(as(Sigma,"symmetricMatrix"))
+    b <- mode + SqrtSigma %*% d
+    Zb <- sum(Z*b)
+    l <- delta*log(h(eta+Zb,etaD))-H(eta+Zb)
+    l
+}
+g <- c(log(.3),log(.4),0.5)
+## gradient wrt g using finite differences
+sapply(1:3, function(i,eps=1e-6) {
+    g[i] <- g[i]+eps
+    val <- l(g)
+    g[i] <- g[i]-2*eps
+    (val - l(g))/2/eps
+})
+
+bf <- function(gamma=c(log(.3),log(.4),0.5)) {
+    Z <- c(1,2)
+    d <- c(1,1)
+    mode <- c(1,2)
+    ## define sqrtmat
+    var <- exp(gamma[c(1,2)])
+    rho <- corrtrans(gamma[3])
+    cov <- rho*sqrt(var[1]*var[2])
+    Sigma <- matrix(c(var[1],cov,cov,var[2]),2,2)
+    ## SqrtSigma <- chol(Sigma)
+    SqrtSigma <- sqrtm(as(Sigma,"symmetricMatrix"))
+    b <- mode + SqrtSigma %*% d
+    b
+}
+## gradient for b wrt g using finite differences
+(gradbwrtg <- sapply(1:3, function(i,eps=1e-6) {
+    g[i] <- g[i]+eps
+    val <- bf(g)
+    g[i] <- g[i]-2*eps
+    (val - bf(g))/2/eps
+}))
+
+var <- exp(g[c(1,2)])
+rho <- corrtrans(g[3])
+cov <- rho*sqrt(var[1]*var[2])
+## wrt g[1]
+matrix(c(g[1]*var[1],cov*g[1]/2,cov*g[1]/2,0),2,2)
+
+##
+A=1; B=0.5; D=2
+M=matrix(c(A,B,B,D),2,2)
+tau <- A+D
+delta <- A*D-B*B
+s <- sqrt(delta)
+t <- sqrt(tau+2*s)
+sqrtM <- matrix(c(A+s,B,B,D+s),2,2)/t
+sqrtM %*% sqrtM
+
+lb <- function(b) {
+    ## initially assume an additive model
+    H <- function(eta) eta
+    h <- function(eta,etaD) etaD
+    delta <- 1
+    eta <- 1
+    etaD <- 2
+    Z <- c(1,2)
+    d <- c(1,1)
+    mode <- c(1,2)
+    Zb <- sum(Z*b)
+    l <- delta*log(h(eta+Zb,etaD))-H(eta+Zb)
+    l
+}
+## gradient wrt b using finite differences
+gradlwrtb <- sapply(1:2, function(i,eps=1e-6) {
+    b[i] <- b[i]+eps
+    val <- lb(b)
+    b[i] <- b[i]-2*eps
+    (val - lb(b))/2/eps
+})
+t(gradbwrtg) %*% gradlwrtb
+
+
+## gradient for a multivariate normal
+require(mvtnorm)
+fdgrad <- function(f,x, ..., eps=1.0e-6) 
+    sapply(1:length(x), function(i) {
+        e <- rep(0,length(x))
+        e[i] <- 1
+        (f(x+e*eps, ...)-f(x-e*eps, ...))/2/eps
+    })
+## hess(i,i) = (-f2 +16.0*f1 - 30.0*f0 + 16.0*fm1 -fm2)/(12.0*hi*hi);
+fdhessian <- function(f,x, ..., eps=1.0e-5) 
+    sapply(1:length(x), function(i) {
+        ei <- rep(0,length(x))
+        ei[i] <- 1
+        sapply(1:length(x), function(j) {
+            ej <- rep(0,length(x))
+            ej[j] <- 1
+            if (i==j) (-f(x+2*ei*eps, ...)+16*f(x+ei*eps, ...)-30*f(x,...)+16*f(x-ei*eps, ...)-f(x-2*ei*eps, ...))/12/eps/eps else (f(x+eps*ei+eps*ej)-f(x+eps*ei-eps*ej)-f(x-eps*ei+eps*ej)+f(x-eps*ei-eps*ej))/4/eps/eps
+        })
+    })
+-fdgrad(mvtnorm::dmvnorm, c(1,1), c(0,0), Sigma <- matrix(c(1,.5,.5,1),2), log=TRUE)
+## fdhessian(mvtnorm::dmvnorm, c(1,1), c(0,0), Sigma <- matrix(c(1,.5,.5,1),2))
+as.vector(solve(Sigma) %*% c(1,1))
 
 
 summary(fit <- stpm2(Surv(start,stime,event)~treat,data=stmixed2,cluster=stmixed$trial,optimiser="NelderMead",recurrent=TRUE))
@@ -1535,8 +1952,8 @@ summary(stpm2(Surv(rectime,censrec==1)~hormon,data=brcancer,
 
 pred <- predict(fit.tvc,newdata=data.frame(hormon=0:3),grid=TRUE,se.fit=TRUE,type="cumhaz")
 pred.all <- cbind(pred,attr(pred,"newdata"))
-require(lattice)
-xyplot(Estimate ~ rectime, data=pred.all, group=hormon,type="l",xlab="Time")
+## require(lattice)
+## xyplot(Estimate ~ rectime, data=pred.all, group=hormon,type="l",xlab="Time")
 
 
 ## relative survival

@@ -1,0 +1,410 @@
+% Created 2016-11-26 Sat 19:04
+\documentclass[11pt]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{fixltx2e}
+\usepackage{graphicx}
+\usepackage{grffile}
+\usepackage{longtable}
+\usepackage{wrapfig}
+\usepackage{rotating}
+\usepackage[normalem]{ulem}
+\usepackage{amsmath}
+\usepackage{textcomp}
+\usepackage{amssymb}
+\usepackage{capt-of}
+\usepackage{hyperref}
+\author{Mark Clements}
+\date{\today}
+\title{}
+\hypersetup{
+ pdfauthor={Mark Clements},
+ pdftitle={},
+ pdfkeywords={},
+ pdfsubject={},
+ pdfcreator={Emacs 24.4.1 (Org mode 8.3.4)}, 
+ pdflang={English}}
+\begin{document}
+
+\tableofcontents
+
+\section{Axiom/Fricas source file}
+\label{sec:orgheadline8}
+
+\subsection{General case}
+\label{sec:orgheadline1}
+
+\begin{verbatim}
+(48) -> )cl p all
+   Compiled code for rule2 has been cleared.
+   Compiled code for G has been cleared.
+(48) -> η := operator 'η
+ 
+   (48)  η
+                                                          Type: BasicOperator
+(49) -> G := operator 'G
+ 
+   (49)  G
+                                                          Type: BasicOperator
+(50) -> rule1 := rule (D(η(t,β),β)==X; D(η(t,β),t)==XD*β; D(η(t,β),[t,β])==XD; η(t,β)==X*β)
+ 
+   (50)  {η  (t,β) == X,η  (t,β) == XD β,η    (t,β) == XD,η(t,β) == X β}
+           ,2            ,1               ,1,2
+                           Type: Ruleset(Integer,Integer,Expression(Integer))
+(51) -> S := G(η(t,β))
+ 
+   (51)  G(η(t,β))
+                                                    Type: Expression(Integer)
+(52) -> H := -log(S)
+ 
+   (52)  - log(G(η(t,β)))
+                                                    Type: Expression(Integer)
+(53) -> h := D(H,t)
+ 
+            ,
+           G (η(t,β))η  (t,β)
+                      ,1
+   (53)  - ------------------
+                G(η(t,β))
+                                                    Type: Expression(Integer)
+(54) -> [D(expr,β) for expr in [S,H,h]]
+ 
+   (54)
+                           ,
+                          G (η(t,β))η  (t,β)
+     ,                               ,2
+   [G (η(t,β))η  (t,β), - ------------------,
+               ,2              G(η(t,β))
+
+                     ,                                               ,,
+         - G(η(t,β))G (η(t,β))η    (t,β) - G(η(t,β))η  (t,β)η  (t,β)G  (η(t,β))
+                               ,1,2                  ,1      ,2
+       + 
+          ,        2
+         G (η(t,β)) η  (t,β)η  (t,β)
+                     ,1      ,2
+    /
+                2
+       G(η(t,β))
+     ]
+                                              Type: List(Expression(Integer))
+(55) -> [rule1 expr for expr in [S,H,h]]
+ 
+                                      ,
+                                 XD βG (X β)
+
+   (55)  [G(X β),- log(G(X β)),- -----------]
+                                    G(X β)
+                                              Type: List(Expression(Integer))
+(56) -> [rule1 D(expr,β) for expr in [S,H,h]]
+ 
+   (56)
+                  ,
+                XG (X β)
+      ,
+   [XG (X β), - --------,
+                 G(X β)
+                    ,,                ,     2             ,
+    - X XD β G(X β)G  (X β) + X XD β G (X β)  - XD G(X β)G (X β)
+
+    ------------------------------------------------------------]
+                                     2
+                               G(X β)
+                                              Type: List(Expression(Integer))
+\end{verbatim}
+
+\subsection{Proportional hazards}
+\label{sec:orgheadline2}
+\begin{verbatim}
+(57) -> G(x) == exp(-exp(x))
+                                                                   Type: Void
+(58) -> S := G(η(t,β))
+    Compiling function G with type Expression(Integer) -> Expression(
+      Integer) 
+
+               η(t,β)
+           - %e
+   (58)  %e
+                                                    Type: Expression(Integer)
+(59) -> H := -log(S)
+ 
+           η(t,β)
+   (59)  %e
+                                                    Type: Expression(Integer)
+(60) -> h := D(H,t)
+ 
+           η(t,β)
+   (60)  %e      η  (t,β)
+                  ,1
+                                                    Type: Expression(Integer)
+(61) -> D(G(x),x)
+    Compiling function G with type Variable(x) -> Expression(Integer) 
+
+                    x
+             x  - %e
+   (61)  - %e %e
+                                                    Type: Expression(Integer)
+(62) -> [rule1 expr for expr in [S,H,h]]
+ 
+                X β
+            - %e      X β        X β
+   (62)  [%e       ,%e   ,XD β %e   ]
+                                              Type: List(Expression(Integer))
+(63) -> [rule1 D(expr,β) for expr in [S,H,h]]
+ 
+                         X β
+                X β  - %e        X β                X β
+   (63)  [- X %e   %e       ,X %e   ,(X XD β + XD)%e   ]
+                                              Type: List(Expression(Integer))
+\end{verbatim}
+
+
+\subsection{Proportional odds}
+\label{sec:orgheadline3}
+
+\begin{verbatim}
+(64) -> G(x) == 1/(1+exp(x))
+   Compiled code for G has been cleared.
+   1 old definition(s) deleted for function or rule G 
+                                                                   Type: Void
+(65) -> S := G(η(t,β))
+    Compiling function G with type Expression(Integer) -> Expression(
+      Integer) 
+
+               1
+   (65)  ------------
+           η(t,β)
+         %e       + 1
+                                                    Type: Expression(Integer)
+(66) -> H := -log(S)
+ 
+                     1
+   (66)  - log(------------)
+                 η(t,β)
+               %e       + 1
+                                                    Type: Expression(Integer)
+(67) -> h := D(H,t)
+ 
+           η(t,β)
+         %e      η  (t,β)
+                  ,1
+   (67)  ----------------
+             η(t,β)
+           %e       + 1
+                                                    Type: Expression(Integer)
+(68) -> D(G(x),x)
+    Compiling function G with type Variable(x) -> Expression(Integer) 
+
+                    x
+                  %e
+   (68)  - -----------------
+              x 2      x
+           (%e )  + 2%e  + 1
+                                                    Type: Expression(Integer)
+(69) -> [rule1 expr for expr in [S,H,h]]
+ 
+                                            X β
+              1               1      XD β %e
+   (69)  [---------,- log(---------),----------]
+            X β             X β         X β
+          %e    + 1       %e    + 1   %e    + 1
+                                              Type: List(Expression(Integer))
+(70) -> [rule1 D(expr,β) for expr in [S,H,h]]
+ 
+                       X β             X β        X β 2                  X β
+                   X %e            X %e     XD (%e   )  + (X XD β + XD)%e
+   (70)  [- ---------------------,---------,--------------------------------]
+               X β 2      X β       X β              X β 2      X β
+            (%e   )  + 2%e    + 1 %e    + 1       (%e   )  + 2%e    + 1
+                                              Type: List(Expression(Integer))
+\end{verbatim}
+
+
+\subsection{Probit}
+\label{sec:orgheadline4}
+
+Is there a more canonical approach in Axiom?
+
+\begin{verbatim}
+(71) -> Φ := operator 'Φ
+
+   (71)  Φ
+                                                          Type: BasicOperator
+(72) -> φ := operator 'φ
+ 
+   (72)  φ
+                                                          Type: BasicOperator
+(73) -> rule2 == rule D(Φ(x),x)==φ(x)
+                                                                    Type: Void
+(74) -> G(x) == Φ(-x)
+    Compiled code for G has been cleared.
+   1 old definition(s) deleted for function or rule G 
+                                                                   Type: Void
+(75) -> S := G(η(t,β))
+    Compiling function G with type Expression(Integer) -> Expression(
+      Integer) 
+
+   (75)  Φ(- η(t,β))
+                                                    Type: Expression(Integer)
+(76) -> H := -log(S)
+ 
+   (76)  - log(Φ(- η(t,β)))
+                                                    Type: Expression(Integer)
+(77) -> h := D(H,t)
+ 
+          ,
+         Φ (- η(t,β))η  (t,β)
+                      ,1
+   (77)  --------------------
+              Φ(- η(t,β))
+                                                    Type: Expression(Integer)
+(78) -> rule2 D(G(x),x)
+    Compiling function G with type Variable(x) -> Expression(Integer) 
+   Compiling body of rule rule2 to compute value of type RewriteRule(
+      Integer,Integer,Expression(Integer)) 
+
+   (78)  - φ(- x)
+                                                    Type: Expression(Integer)
+(79) -> [rule1 rule2 expr for expr in [S,H,h]]
+ 
+                                   XD β φ(- X β)
+   (79)  [Φ(- X β),- log(Φ(- X β)),-------------]
+                                      Φ(- X β)
+                                              Type: List(Expression(Integer))
+(80) -> [rule1 rule2 D(expr,β) for expr in [S,H,h]]
+ 
+   (80)
+                  X φ(- X β)
+   [- X φ(- X β), ----------,
+                   Φ(- X β)
+                      ,                         2
+    - X XD β Φ(- X β)φ (- X β) + X XD β φ(- X β)  + XD Φ(- X β)φ(- X β)
+
+    -------------------------------------------------------------------]
+                                         2
+                                 Φ(- X β)
+                                              Type: List(Expression(Integer))
+\end{verbatim}
+
+\subsection{Additive hazards}
+\label{sec:orgheadline5}
+
+
+\begin{verbatim}
+(81) -> G(x) == exp(-x)
+   Compiled code for G has been cleared.
+   1 old definition(s) deleted for function or rule G 
+                                                                   Type: Void
+(82) -> S := G(η(t,β))
+    Compiling function G with type Expression(Integer) -> Expression(
+      Integer) 
+
+           - η(t,β)
+   (82)  %e
+                                                    Type: Expression(Integer)
+(83) -> H := -log(S)
+ 
+   (83)  η(t,β)
+                                                    Type: Expression(Integer)
+(84) -> h := D(H,t)
+ 
+   (84)  η  (t,β)
+          ,1
+                                                    Type: Expression(Integer)
+(85) -> D(G(x),x)
+    Compiling function G with type Variable(x) -> Expression(Integer) 
+
+             - x
+   (85)  - %e
+                                                    Type: Expression(Integer)
+(86) -> [rule1 expr for expr in [S,H,h]]
+ 
+            - X β
+   (86)  [%e     ,X β,XD β]
+                                              Type: List(Expression(Integer))
+(87) -> [rule1 D(expr,β) for expr in [S,H,h]]
+ 
+                - X β
+   (87)  [- X %e     ,X,XD]
+                                              Type: List(Expression(Integer))
+\end{verbatim}
+
+\subsection{Aranda-Ordaz}
+\label{sec:orgheadline6}
+\begin{verbatim}
+(88) -> G(x) == exp(-log(θ*exp(x)+1)/θ)
+   Compiled code for G has been cleared.
+   1 old definition(s) deleted for function or rule G 
+                                                                   Type: Void
+(89) -> S := G(η(t,β))
+    Compiling function G with type Expression(Integer) -> Expression(
+      Integer) 
+
+                     η(t,β)
+             log(θ %e       + 1)
+           - -------------------
+                      θ
+   (89)  %e
+                                                    Type: Expression(Integer)
+(90) -> H := -log(S)
+ 
+                 η(t,β)
+         log(θ %e       + 1)
+   (90)  -------------------
+                  θ
+                                                    Type: Expression(Integer)
+(91) -> h := D(H,t)
+ 
+           η(t,β)
+         %e      η  (t,β)
+                  ,1
+   (91)  ----------------
+              η(t,β)
+          θ %e       + 1
+                                                    Type: Expression(Integer)
+(92) -> D(G(x),x)
+    Compiling function G with type Variable(x) -> Expression(Integer) 
+
+                          x
+                  log(θ %e  + 1)
+                - --------------
+             x           θ
+           %e %e
+   (92)  - ---------------------
+                     x
+                 θ %e  + 1
+                                                    Type: Expression(Integer)
+(93) -> [rule1 expr for expr in [S,H,h]]
+ 
+                      X β
+              log(θ %e    + 1)
+            - ----------------         X β              X β
+                      θ        log(θ %e    + 1)  XD β %e
+   (93)  [%e                  ,----------------,-----------]
+                                       θ            X β
+                                                θ %e    + 1
+                                              Type: List(Expression(Integer))
+(94) -> [rule1 D(expr,β) for expr in [S,H,h]]
+ 
+   (94)
+                         X β
+                 log(θ %e    + 1)
+               - ----------------
+          X β            θ               X β
+      X %e   %e                      X %e
+   [- ---------------------------, -----------,
+                  X β                  X β
+              θ %e    + 1          θ %e    + 1
+            X β 2                  X β
+    XD θ (%e   )  + (X XD β + XD)%e
+    ----------------------------------]
+          2   X β 2        X β
+         θ (%e   )  + 2θ %e    + 1
+                                              Type: List(Expression(Integer))
+\end{verbatim}
+
+\subsection{Other links}
+\label{sec:orgheadline7}
+
+The development for other links would be similar.
+\end{document}
