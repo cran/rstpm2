@@ -1,7 +1,7 @@
-f964eb6b9289a7f538095ce575adbec8 *DESCRIPTION
+9f70f16cb45cd53f8e8611583f2e432f *DESCRIPTION
 70343b9696894ffc731b5c96971a72f8 *NAMESPACE
 55025c7f6c8b94e5807a51dca13f3618 *R/aft.R
-ca94e9b82f1dab92177d3af8f451a59e *R/pm2-3.R
+5807b8bb51614f3234327bd62c753abc *R/pm2-3.R
 46cbe305acaa8388724780efbc8d144f *R/tvc.coxph.R
 0f415be5691316ba6ce22b17d496431f *R/zzz.R
 b05130e451d2b655adbca443a271672d *README.md
@@ -21,7 +21,7 @@ b560d5bddde93de19afd61b590aa31a2 *inst/auto/math.el
 9ea1e1d2fb225aa788545363a9fa1ceb *inst/competing_risks.R
 43c10a3b5717bc04c8434836c8818b78 *inst/doc/Introduction.R
 9e0150cb0c8d179cc350b37fec2a7b74 *inst/doc/Introduction.Rnw
-049aa87b2b0432e6b53b604c5e79fd2d *inst/doc/Introduction.pdf
+d43aa2617001b6031a37e6d3e9eb2fa7 *inst/doc/Introduction.pdf
 5dc49ecb15329a32858579ff30869067 *inst/fig1-README.md.jpg
 02aabc3edb266e6d2d2afd7eb6a236cd *inst/fig2-README.md.jpg
 b2b94621371df8d9296b8bf5bec1b851 *inst/math.aux
@@ -40,7 +40,7 @@ c68ed9305f593cb12c4b8031428a7bf4 *inst/test.do
 2d0b1a2306fae549df8670d47c414326 *inst/tvc-cox.R
 deeac3aaa642d5153214b9a6dff24e10 *inst/unitTests/runTests.R
 fac220d92ba67c683c8418f043dc8b85 *inst/unitTests/runit.Basic.R
-3fdeb718d1ab3a523810e1eb253f23e2 *inst/working_code.R
+7f0681e08622b22f427bda5963811e5a *inst/working_code.R
 0768a7a480f3a00c4183ccb732ac0883 *man/Rstpm2-package.Rd
 141492db75a556986d9aba4b04f72297 *man/aft-class.Rd
 76e8b4f653acb93f46363c4cee2f9d32 *man/aft.Rd
