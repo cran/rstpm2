@@ -23,14 +23,14 @@ pstpm2(formula, data, smooth.formula = NULL, smooth.args = NULL,
        control = list(parscale = 1, maxit = 300), init = NULL,
        coxph.strata = NULL, coxph.formula = NULL,
        weights = NULL, robust = FALSE, 
-       bhazard = NULL, timeVar = "", time0Var = "",
+       bhazard = NULL, bhazinit = 0.1, timeVar = "", time0Var = "",
        sp=NULL, use.gr = TRUE, 
        criterion=c("GCV","BIC"), penalty = c("logH","h"),
        smoother.parameters = NULL,
        alpha=if (is.null(sp)) switch(criterion,GCV=1,BIC=1) else 1,
        sp.init=1, trace = 0,
        link.type=c("PH","PO","probit","AH","AO"), theta.AO=0,
-       optimiser = c("BFGS", "NelderMead", "Nlm"),
+       optimiser = c("BFGS", "NelderMead", "Nlm"), log.time.transform=TRUE,
        recurrent = FALSE, frailty=!is.null(cluster) & !robust,cluster = NULL,
        logtheta=-6, nodes=9,
        RandDist=c("Gamma","LogN"), adaptive = TRUE, maxkappa=1000, Z = ~1, 
@@ -77,6 +77,10 @@ a list with the names of the time-varying coefficients
 \item{robust}{Boolean used to determine whether to use a robust variance
   estimator.}
 \item{bhazard}{variable for the baseline hazard for relative survival}
+  \item{bhazinit}{
+scalar used to adjust the background cumulative hazards for calculating
+initial values. Default=0.1.
+}
 \item{timeVar}{variable defining the time variable. By default, this is
 determined from the survival object, however this may be ambiguous if
 two variables define the time}
@@ -106,6 +110,8 @@ two variables define the time}
 hazards), g(S)=-log(S); for "AO" (generalised Aranda-Ordaz), g(S)=log((S^(-theta.AO)-1)/theta.AO).}
 \item{theta.AO}{theta parameter for the Aranda-Ordaz link type.}
 \item{optimiser}{select which optimiser is used}
+\item{log.time.transform}{should a log-transformation be used for
+  calculating the derivative of the design matrix with respect to time? (default=TRUE)}
 \item{recurrent}{logical for whether clustered, left truncated data are
   recurrent or for first event (where the latter requires an adjustment
   for the frailties or random effects)}

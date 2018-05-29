@@ -1,14 +1,27 @@
 useDynLib(rstpm2, .registration=TRUE)
 
-export(stpm2,pstpm2,incrVar,nsx,predictnl,"coef<-",cox.tvc,aft,nsxD)
 exportClasses(stpm2,pstpm2,tvcCoxph,aft)
+
+export(stpm2,pstpm2,incrVar,nsx,predictnl,"coef<-",cox.tvc,aft,nsxD,
+       eform, predictnl, coef, confint)
+export(predictnl.default, confint.predictnl)
+
 S3method(makepredictcall, nsx)
-S3method(predict, nsx)
 S3method(makepredictcall, nsxD)
+S3method(predict, nsx)
 S3method(predict, nsxD)
+S3method(predict, formula)
+S3method(predictnl, default)
+S3method(predictnl, lm)
+S3method(print, predictnl)
+S3method(confint, predictnl)
+S3method(lines, stpm2)
+S3method(lines, pstpm2)
+S3method(eform, stpm2)
+
 ## All methods for imported generics:
 exportMethods(plot,predict,predictnl,coef,confint,summary,update,anova,vcov,formula,
-              BIC,AIC,AICc,qAICc,simulate,residuals)
+              BIC,AIC,AICc,qAICc,simulate,residuals,lines,eform)
 
 importFrom(graphics,plot,lines,matplot,par,polygon,abline,matlines)
 ## importFrom(splines,bs,ns,spline.des,splineDesign)
@@ -16,7 +29,7 @@ importFrom(stats, quantile, lm, as.formula, coef, makepredictcall, na.fail, pred
            contrasts,delete.response, get_all_vars, model.extract, model.frame, 
            model.matrix, model.weights, na.pass, optimHess, pweibull, 
            terms, terms.formula, .checkMFClasses, .getXlevels, pchisq, printCoefmat,
-           anova, var, residuals)
+           anova, var, residuals, confint, qnorm)
 importFrom(mgcv,gam,s)
 importFrom(Rcpp,sourceCpp)
 import(bbmle,methods,survival,splines,numDeriv)

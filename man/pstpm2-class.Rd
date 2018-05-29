@@ -3,6 +3,7 @@
 \docType{class}
 \alias{pstpm2-class}
 \alias{plot,pstpm2,missing-method}
+\alias{lines,pstpm2-method}
 %\alias{predict,pstpm2-method}
 \alias{predictnl,pstpm2-method}
 \alias{AIC,pstpm2-method}
@@ -11,6 +12,7 @@
 \alias{anova,pstpm2-method}
 \alias{qAICc,pstpm2-method}
 \alias{summary,pstpm2-method}
+\alias{eform,pstpm2-method}
 
 \title{Class "pstpm2" }
 \description{Regression object for \code{pstpm2}.}
@@ -66,6 +68,7 @@ Class \code{"\linkS4class{mle2}"}, directly.
 \section{Methods}{
   \describe{
     \item{plot}{\code{signature(x = "pstpm2", y = "missing")}: ... }
+    \item{lines}{\code{signature(x = "pstpm2", ...)}: ... }
     %\item{predict}{\code{signature(object = "pstpm2")}: ... }
     \item{anova}{\code{signature(object = "pstpm2",...)}: ... }
     \item{AIC}{\code{signature(object = "pstpm2",...,k=2)}: ... }
@@ -74,6 +77,7 @@ Class \code{"\linkS4class{mle2}"}, directly.
     \item{qAICc}{\code{signature(object = "pstpm2",..., nobs = NULL, dispersion = 1, k = 2)}: ... }
     \item{qAIC}{\code{signature(object = "pstpm2",..., dispersion = 1, k = 2)}: ... }
     \item{summary}{\code{signature(object = "pstpm2",...)}: ... }
+    \item{eform}{\code{signature(object = "pstpm2",...)}: ... }
     \item{predictnl}{\code{signature(object = "pstpm2",...)}: ... }
 	 }
 }

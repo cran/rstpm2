@@ -16,20 +16,22 @@
 
     \S4method{predict}{stpm2}(object, newdata=NULL,
                type=c("surv","cumhaz","hazard","density","hr","sdiff",
-               "hdiff","loghazard","link","meansurv","meansurvdiff",
+               "hdiff","loghazard","link","meansurv","meansurvdiff","meanhr",
                "odds","or","margsurv","marghaz","marghr","meanhaz","af",
-               "fail","margfail","meanmargsurv","uncured"),
+               "fail","margfail","meanmargsurv","uncured","rmst","probcure"),
                grid=FALSE,seqLength=300,
-               se.fit=FALSE,link=NULL,exposed=incrVar(var),var,
-               keep.attributes=TRUE, use.gr=TRUE,...)
+               type.relsurv=c("excess","total","other"), scale=365.24,
+               rmap=list(), ratetable=survival::survexp.us,
+               se.fit=FALSE,link=NULL,exposed=incrVar(var),var=NULL,
+               keep.attributes=FALSE, use.gr=TRUE,level=0.95,...)
     \S4method{predict}{pstpm2}(object, newdata=NULL,
                type=c("surv","cumhaz","hazard","density","hr","sdiff",
-               "hdiff","loghazard","link","meansurv","meansurvdiff",
+               "hdiff","loghazard","link","meansurv","meansurvdiff","meanhr",
                "odds","or","margsurv","marghaz","marghr","meanhaz","af",
-               "fail","margfail","meanmargsurv"),
+               "fail","margfail","meanmargsurv","rmst"),
                grid=FALSE,seqLength=300,
-               se.fit=FALSE,link=NULL,exposed=incrVar(var),var,
-               keep.attributes=TRUE, use.gr=TRUE,...)
+               se.fit=FALSE,link=NULL,exposed=incrVar(var),var=NULL,
+               keep.attributes=FALSE, use.gr=TRUE,level=0.95,...)
 }
 \arguments{
   \item{object}{an \code{stpm2} or \code{pstpm2} object}
@@ -57,17 +59,28 @@
       \item{"marghaz"}{marginal (population) hazard}
       \item{"marghr"}{marginal (population) hazard ratio}
       \item{"meanhaz"}{mean hazard}
+      \item{"meanhr"}{mean hazard ratio}
       \item{"af"}{attributable fraction}
       \item{"fail"}{failure (=1-survival)}
       \item{"margfail"}{marginal failure (=1-marginal survival)}
       \item{"meanmargsurv"}{mean marginal survival, averaged over the
                frailty distribution}
       \item{"uncured"}{distribution for the uncured}
+      \item{"rmst"}{restricted mean survival time}
+      \item{"probcure"}{probability of cure}
     }
   }
   \item{grid}{whether to merge newdata with a regular sequence of event
     times (default=FALSE)}
   \item{seqLength}{length of the sequence used when \code{grid=TRUE}}
+  \item{type.relsurv}{type of predictions for relative survival models:
+               either "excess", "total" or "other"}
+  \item{scale}{scale to go from the days in the \code{ratetable} object
+    to the analysis time used in the analysis}
+  \item{rmap}{an optional list that maps data set names to the ratetable
+          names. See \code{survexp}}
+  \item{ratetable}{a table of event rates used in relative survival when
+               \code{type.relsurv} is "total" or "other"}
   \item{se.fit}{whether to calculate confidence intervals (default=FALSE)}
   \item{link}{allows a different link for the confidence interval
     calculation (default=NULL, such that
@@ -78,6 +91,7 @@
                data-frame for those exposed or the counterfactual (defaults to incrementing ``var'')}
   \item{var}{specify the variable name or names for the
                exposed/unexposed (names are given as characters)}
+  \item{level}{significance level for the confidence interval}
   \item{keep.attributes}{Boolean to determine whether the output should
                include the newdata as an attribute (default=TRUE)}
   \item{use.gr}{Boolean to determine whether to use gradients in the

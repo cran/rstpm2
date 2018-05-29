@@ -18,6 +18,74 @@
 ##   require(bbmle)
 ## }
 
+## Examples using predictnl for Alessandro
+library(rstpm2)
+brcancer2 <- transform(brcancer, x4.23=x4 %in% 2:3)
+fit1 <- stpm2(Surv(rectime,censrec==1)~hormon*x4.23,data=brcancer2,df=3)
+summary(fit1)
+newd <- data.frame(hormon=0,x4.23=FALSE)
+plot(fit1, newdata=newd)
+RERI <- function(object, newdata,
+                 var1, val1=1, 
+                 var2, val2=1) {
+    exp1 <- function(data) {data[[var1]] <- val1; data}
+    exp2 <- function(data) {data[[var2]] <- val2; data}
+    s00 <- predict(object, newdata, type="surv")
+    s10 <- predict(object, newdata=exp1(newdata), type="surv")
+    s01 <- predict(object, newdata=exp2(newdata), type="surv")
+    s11 <- predict(object, newdata=exp1(exp2(newdata)), type="surv")
+    -(s11-s10-s01+s00)/(1-s00)
+}
+times <- seq(0,2500,length=301)[-1]
+reri <- RERI(fit1,newdata=transform(newd,rectime=times),var1="hormon",var2="x4.23",val2=TRUE)
+plot(times,reri,type="l")
+reri2 <- predictnl(fit1,fun=RERI,newdata=transform(newd,rectime=times),var1="hormon",var2="x4.23",val2=TRUE)
+with(reri2, matplot(times,fit+cbind(0,-1.96*se.fit,+1.96*se.fit),type="l",lty=c(1,2,2),col=1,
+                    xlab="Time since diagnosis", ylab="RERI"))
+abline(h=0,lty=3)
+
+RERI.hr <- function(object, newdata,
+                 var1, val1=1, 
+                 var2, val2=1) {
+    exp1 <- function(data) {data[[var1]] <- data[[var1]]+val1; data}
+    exp2 <- function(data) {data[[var2]] <- data[[var2]]+val2; data}
+    h00 <- predict(object, newdata, type="haz")
+    h10 <- predict(object, newdata=exp1(newdata), type="haz")
+    h01 <- predict(object, newdata=exp2(newdata), type="haz")
+    h11 <- predict(object, newdata=exp1(exp2(newdata)), type="haz")
+    (h11-h10-h01+h00)/h00
+}
+RERI.hr(fit1,newdata=transform(newd,rectime=1000),var1="hormon",var2="x4.23",val2=TRUE)
+predictnl(fit1,fun=RERI.hr,newdata=transform(newd,rectime=1000),var1="hormon",var2="x4.23",val2=TRUE)
+
+
+
+## testing of relative survival
+library(rstpm2)
+ayear <- 365.24
+brcancer2 <- transform(brcancer, age=80*ayear, sex="male", year=as.Date("1980-01-01"), time=1, recyear=rectime/ayear)
+rate0 <- survexp(time~1,data=brcancer2,method="individual.h",scale=ayear)
+(fit1 <- stpm2(Surv(recyear,censrec==1)~hormon,data=brcancer2,df=2,cure=T,bhazard=rate0))
+head(predict(fit1,type.relsurv="excess"))
+head(predict(fit1,type.relsurv="total"))
+head(brcancer2)
+
+ayear <- 365.24
+timeVar <- substitute(times)
+scale <- ayear
+rmap <- substitute(list())
+newdata <- data.frame(sex=c("male",rep("male",5)),age=ayear*60,year=2002,times=c(1,1:5))
+survexp1 <- do.call(survexp, list(substitute(I(timeVar*scale)~1,list(timeVar=timeVar)),
+                                  ratetable=survexp.us,
+                                  scale=scale,
+                                  rmap=rmap,
+                                  cohort=FALSE,
+                                  data=newdata))
+
+
+plot(fit1, newdata=data.frame(hormon=1,age=80,sex="male",year=1980))
+## lines(fit1, newdata=data.frame(hormon=1,age=80,sex="male",year=1980))
+
 ## Bug report from Alessandro for 1.4.0
 library(rstpm2)
 data(kidney)
@@ -27,6 +95,32 @@ head(predict(fitg))
 fitln = stpm2(Surv(time, status) ~ age + sex, cluster = kidney$id, data = kidney, 
   RandDist = "LogN")
 head(predict(fitln))
+fitln = stpm2(Surv(time, status) ~ age + sex, cluster = kidney$id, data = kidney, Z=~age-1,
+  RandDist = "LogN")
+head(predict(fitln))
+
+## test meanhr
+library(rstpm2)
+fit <- stpm2(Surv(rectime, censrec==1) ~ x4+x5, data = brcancer, df=3)
+fit <- stpm2(Surv(rectime, censrec==1) ~ x4+x5, data = brcancer, df=3)
+summary(fit)
+eform(fit)
+plot(fit, newdata=data.frame(hormon=0,x4=0,x5=0))
+plot(fit, newdata=data.frame(hormon=0,x4=0,x5=0),type="hazard")
+plot(fit, newdata=data.frame(hormon=0,x4=0,x5=0), type="hr", exposed=function(data) transform(data, x4=1))
+plot(fit, newdata=transform(brcancer,x4=1), type="meanhr", exposed=function(data) transform(data, x4=2))
+plot(fit, newdata=transform(brcancer,x4=1), type="meanhaz")
+
+## test rmst
+library(rstpm2)
+fit <- stpm2(Surv(rectime, censrec==1) ~ hormon, data = brcancer, df=3)
+plot(fit, newdata=data.frame(hormon=1))
+predict(fit, newdata=data.frame(hormon=1,rectime=1000), type="rmst", se.fit=TRUE)
+predict(fit, newdata=data.frame(hormon=0,rectime=1000), type="rmst", se.fit=TRUE)
+
+library(devtools)
+install.packages("bbmle")
+devtools::install_github("mclements/rstpm2",ref="develop")
 
 ## 2017-06-21 
 ## Verify: the choice of basis dimension (default: k=10) for penalized regression splines is not sensitive to estimates
@@ -186,13 +280,14 @@ predict(fit,type="af",newdata=transform(d,t=1),exposed=function(data) transform(
 
 ## Fit a frailty object
 library(stdReg)
-fit <- stdReg::frailty(formula = Surv(t, delta) ~ X + Z + X * Z, data = d, clusterid = "id")
+fit <- stdReg::parfrailty(formula = Surv(t, delta) ~ X + Z + X * Z, data = d, clusterid = "id")
 summary(fit)
 ## Estimate the attributable fraction from the fitted frailty model
 time <- c(seq(from = 0.2, to = 1, by = 0.2))
 time <- 1
 ## debug(AFfrailty)
-AFfrailty_est <- AFfrailty(object = fit, data = d, exposure = "X", times = time, clusterid = "id")
+library(AF)
+AFfrailty_est <- AFparfrailty(object = fit, data = d, exposure = "X", times = time, clusterid = "id")
 AFfrailty_est
 ##AF:::summary.AF(AFfrailty_est)
 
@@ -478,6 +573,11 @@ stmixed <- read.dta("http://fmwww.bc.edu/repec/bocode/s/stmixed_example2.dta")
 stmixed2 <- transform(stmixed, start = ifelse(treat,stime/2,0))
 summary(r2 <- stpm2(Surv(stime,event)~treat,data=stmixed2,cluster=stmixed$trial,RandDist="LogN",df=3,Z=~treat-1,adaptive=TRUE,optimiser="NelderMead"))
 summary(r2 <- stpm2(Surv(stime,event)~treat,data=stmixed2,cluster=stmixed$trial,RandDist="LogN",df=3,Z=~treat-1,adaptive=TRUE))
+##
+library(foreign)
+library(rstpm2)
+stmixed <- read.dta("http://fmwww.bc.edu/repec/bocode/s/stmixed_example2.dta")
+summary(r <- stpm2(Surv(stime,event)~treat,data=stmixed,cluster=stmixed$trial,RandDist="LogN",df=3,Z=~treat-1))
 
 ## non-adaptive
 system.time(print(summary(r2 <- stpm2(Surv(stime,event)~treat,data=stmixed2,cluster=stmixed$trial,RandDist="LogN",df=3,Z=~treat,adaptive=FALSE,nodes=20,optimiser="NelderMead")))) # slow and gradients not close to zero
@@ -490,6 +590,7 @@ summary(r2 <- stpm2(Surv(stime,event)~treat,data=stmixed2,cluster=stmixed$trial,
 ## Simple examples with no random effects and with a random intercept (check: deviances)
 summary(r2 <- stpm2(Surv(stime,event)~treat,data=stmixed,df=3))
 summary(r2 <- stpm2(Surv(stime,event)~treat,data=stmixed,cluster=stmixed$trial,RandDist="LogN",df=3,Z=~treat-1))
+
 
 ## check modes and sqrttau
 args <- r2@args
@@ -2108,6 +2209,54 @@ d <- data.frame(x,y)
 (fit1 <- mle2a(y~dpois(lambda=ymean),start=list(ymean=mean(y)),data=d)) # okay
 (fit1.2 <- mle2a(y~dpois(lambda=ymean),start=list(ymean=mean(y)),data=d,
               control=list(parscale=2))) # FAILS
+
+
+
+## stdReg::parfrailty documentation
+library(stdReg)
+library(survival)
+     
+## simulate data
+n <- 1000
+m <- 3
+alpha <- 1.5
+eta <- 1
+phi <- 0.5
+beta <- 1
+id <- rep(1:n, each=m)
+U <- rep(rgamma(n, shape=1/phi,scale=phi), each=m)
+X <- rnorm(n*m)
+## reparametrize scale as in rweibull function
+weibull.scale <- alpha/(U*exp(beta*X))^(1/eta)
+T <- rweibull(n*m, shape=eta, scale=weibull.scale)
+## right censoring
+C <- runif(n*m, 0,10)
+D <- as.numeric(T<C)
+T <- pmin(T, C)
+## strong left-truncation
+L <- runif(n*m, 0, 2)
+incl <- T>L
+incl <- ave(x=incl, id, FUN=sum)==m
+dd <- data.frame(L, T, D, X, id)
+dd <- dd[incl, ]  
+##
+fit <- parfrailty(formula=Surv(L, T, D)~X, data=dd, clusterid="id")
+summary(fit)
+##
+library(rstpm2)
+fit2 <- stpm2(formula=Surv(L, T, D)~X, data=dd, cluster=dd$id, smooth.formula=~log(T))
+summary(fit2)
+
+## ignore left truncation
+fit <- parfrailty(formula=Surv(T, D)~X, data=dd, clusterid="id")
+summary(fit)
+fit2 <- stpm2(Surv(T, D)~X, data=dd, cluster=dd$id, smooth.formula=~log(T))
+summary(fit2)
+## normal random effect
+fit2 <- stpm2(formula=Surv(T, D)~X, data=dd, cluster=dd$id, smooth.formula=~log(T), RandDist="LogN")
+summary(fit2)
+
+
 
 ## end of examples ##
 

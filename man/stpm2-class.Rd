@@ -3,9 +3,11 @@
 \docType{class}
 \alias{stpm2-class}
 \alias{plot,stpm2,missing-method}
+\alias{lines,stpm2-method}
 %\alias{predict,stpm2-method}
 \alias{predictnl,stpm2-method}
 \alias{summary,stpm2-method}
+\alias{eform,stpm2-method}
 
 \title{Class "stpm2" ~~~ }
 \description{Regression object for \code{stpm2}.}
@@ -56,9 +58,11 @@ Class \code{"\linkS4class{mle2}"}, directly.
 \section{Methods}{
   \describe{
     \item{plot}{\code{signature(x = "stpm2", y = "missing")}: ... }
+    \item{lines}{\code{signature(x = "stpm2", ...)}: ... }
     %\item{predict}{\code{signature(object = "stpm2")}: ... }
     \item{predictnl}{\code{signature(object = "stpm2", ...)}: ... }
     \item{summary}{\code{signature(object = "stpm2", ...)}: ... }
+    \item{eform}{\code{signature(object = "stpm2", ...)}: ... }
 	 }
 }
 %% \references{ ~put references to the literature/web site here ~ }

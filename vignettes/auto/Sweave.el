@@ -1,14 +1,15 @@
 (TeX-add-style-hook
- "Introduction"
+ "Sweave"
  (lambda ()
-   (TeX-add-to-alist 'LaTeX-provided-class-options
-                     '(("jss" "nojss")))
    (TeX-add-to-alist 'LaTeX-provided-package-options
-                     '(("inputenc" "utf8") ("geometry" "margin=2.6cm")))
+                     '(("fontenc" "T1") ("zi4" "noupquote")))
    (add-to-list 'LaTeX-verbatim-environments-local "VerbatimOut")
    (add-to-list 'LaTeX-verbatim-environments-local "SaveVerbatim")
+   (add-to-list 'LaTeX-verbatim-environments-local "LVerbatim*")
    (add-to-list 'LaTeX-verbatim-environments-local "LVerbatim")
+   (add-to-list 'LaTeX-verbatim-environments-local "BVerbatim*")
    (add-to-list 'LaTeX-verbatim-environments-local "BVerbatim")
+   (add-to-list 'LaTeX-verbatim-environments-local "Verbatim*")
    (add-to-list 'LaTeX-verbatim-environments-local "Verbatim")
    (add-to-list 'LaTeX-verbatim-macros-with-braces-local "hyperref")
    (add-to-list 'LaTeX-verbatim-macros-with-braces-local "hyperimage")
@@ -16,25 +17,24 @@
    (add-to-list 'LaTeX-verbatim-macros-with-braces-local "nolinkurl")
    (add-to-list 'LaTeX-verbatim-macros-with-braces-local "url")
    (add-to-list 'LaTeX-verbatim-macros-with-braces-local "path")
-   (add-to-list 'LaTeX-verbatim-macros-with-braces-local "Verb")
    (add-to-list 'LaTeX-verbatim-macros-with-delims-local "path")
    (add-to-list 'LaTeX-verbatim-macros-with-delims-local "Verb")
    (TeX-run-style-hooks
-    "latex2e"
-    "jss"
-    "jss10"
-    "amsmath"
-    "amsfonts"
-    "enumitem"
+    "ifthen"
+    "graphicx"
     "fancyvrb"
-    "hyperref"
-    "inputenc"
-    "geometry"
-    "wasysym"
-    "tablefootnote")
-   (LaTeX-add-labels
-    "tab:links"
-    "tab:condpostest"
-    "tab:margpostest"))
+    "textcomp"
+    "fontenc"
+    "ae"
+    "zi4"
+    "inconsolata")
+   (TeX-add-symbols
+    '("Sconcordance" 1))
+   (LaTeX-add-environments
+    "Schunk")
+   (LaTeX-add-fancyvrb-environments
+    '("Sinput" "Verbatim")
+    '("Soutput" "Verbatim")
+    '("Scode" "Verbatim")))
  :latex)
 

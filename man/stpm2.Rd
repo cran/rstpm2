@@ -21,8 +21,9 @@ stpm2(formula, data,
       NULL, control = list(parscale = 1, maxit = 300),
       init = NULL, coxph.strata = NULL, weights = NULL,
       robust = FALSE, baseoff = FALSE, bhazard = NULL,
+      bhazinit = 0.1,
       timeVar = "", time0Var = "", use.gr = TRUE,
-      optimiser=c("BFGS","NelderMead"),
+      optimiser=c("BFGS","NelderMead"), log.time.transform=TRUE,
       reltol=1.0e-8, trace = 0,
       link.type=c("PH","PO","probit","AH","AO"), theta.AO=0, 
       frailty = !is.null(cluster) & !robust, cluster = NULL, logtheta=-6, nodes=9,
@@ -81,6 +82,10 @@ a vector for the background hazard for relative survival estimation. At
 present, this does not use \code{data} and it is required for
 all individuals - although it is only used at the event times.
 }
+  \item{bhazinit}{
+scalar used to adjust the background cumulative hazards for calculating
+initial values. Default=0.1.
+}
 \item{control}{\code{control} argument passed to \code{optim}.}
 \item{init}{\code{init} should either be \code{FALSE}, such that initial
                   values will be determined using Cox regression, or a numeric
@@ -106,6 +111,8 @@ two variables define the time}
   for when more than one data variable is used in the entry time.}
 \item{use.gr}{logical indicating whether to use gradients in the calculation}
 \item{optimiser}{select which optimiser is used}
+\item{log.time.transform}{should a log-transformation be used for
+  calculating the derivative of the design matrix with respect to time? (default=TRUE)}
 \item{link.type}{type of link function. For "PH" (generalised
   proportional hazards), g(S)=log(-log(S)); for
 "PO" (generalised proportional odds), g(S)=-logit(S); for "probit"
