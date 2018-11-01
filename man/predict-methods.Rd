@@ -21,9 +21,10 @@
                "fail","margfail","meanmargsurv","uncured","rmst","probcure"),
                grid=FALSE,seqLength=300,
                type.relsurv=c("excess","total","other"), scale=365.24,
-               rmap=list(), ratetable=survival::survexp.us,
+               rmap, ratetable=survival::survexp.us,
                se.fit=FALSE,link=NULL,exposed=incrVar(var),var=NULL,
-               keep.attributes=FALSE, use.gr=TRUE,level=0.95,...)
+               keep.attributes=FALSE, use.gr=TRUE,level=0.95,
+               n.gauss.quad=100,full=FALSE,...)
     \S4method{predict}{pstpm2}(object, newdata=NULL,
                type=c("surv","cumhaz","hazard","density","hr","sdiff",
                "hdiff","loghazard","link","meansurv","meansurvdiff","meanhr",
@@ -31,7 +32,8 @@
                "fail","margfail","meanmargsurv","rmst"),
                grid=FALSE,seqLength=300,
                se.fit=FALSE,link=NULL,exposed=incrVar(var),var=NULL,
-               keep.attributes=FALSE, use.gr=TRUE,level=0.95,...)
+               keep.attributes=FALSE, use.gr=TRUE,level=0.95,
+               n.gauss.quad=100,full=FALSE,...)
 }
 \arguments{
   \item{object}{an \code{stpm2} or \code{pstpm2} object}
@@ -91,11 +93,16 @@
                data-frame for those exposed or the counterfactual (defaults to incrementing ``var'')}
   \item{var}{specify the variable name or names for the
                exposed/unexposed (names are given as characters)}
-  \item{level}{significance level for the confidence interval}
   \item{keep.attributes}{Boolean to determine whether the output should
                include the newdata as an attribute (default=TRUE)}
   \item{use.gr}{Boolean to determine whether to use gradients in the
                variance calculations when they are available (default=TRUE)}
+  \item{level}{confidence level for the confidence intervals (default=0.95)}
+  \item{n.gauss.quad}{number of Gauassian quadrature points used for
+               integrations (default=100)}
+  \item{full}{logical for whether to return a full data-frame with
+               predictions and \code{newdata} combined. Useful for
+               \code{lattice} and \code{ggplot2} plots. (default=FALSE)}
   \item{\dots}{additional arguments (for generic compatibility)}
 }
 

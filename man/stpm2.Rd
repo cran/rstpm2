@@ -19,14 +19,15 @@ stpm2(formula, data,
       df = 3, cure = FALSE, logH.args = NULL,
       logH.formula = NULL, tvc = NULL, tvc.formula =
       NULL, control = list(parscale = 1, maxit = 300),
-      init = NULL, coxph.strata = NULL, weights = NULL,
+      init = NULL, coxph.strata = NULL,
+      coxph.formula = NULL, weights = NULL,
       robust = FALSE, baseoff = FALSE, bhazard = NULL,
       bhazinit = 0.1,
       timeVar = "", time0Var = "", use.gr = TRUE,
       optimiser=c("BFGS","NelderMead"), log.time.transform=TRUE,
       reltol=1.0e-8, trace = 0,
       link.type=c("PH","PO","probit","AH","AO"), theta.AO=0, 
-      frailty = !is.null(cluster) & !robust, cluster = NULL, logtheta=-6, nodes=9,
+      frailty = !is.null(cluster) & !robust, cluster = NULL, logtheta=NULL, nodes=9,
       RandDist=c("Gamma","LogN"), recurrent = FALSE, adaptive=TRUE,
       maxkappa=1000, Z=~1,
       contrasts = NULL,
@@ -92,6 +93,8 @@ initial values. Default=0.1.
                   vector of initial values.}
 \item{coxph.strata}{variable in the \code{data} argument for
   stratification of the \code{coxph} model fit for estimating initial values.}
+\item{coxph.formula}{additional formula used to improve the fitting of
+  initial values [optional and rarely used].}
 \item{weights}{an optional vector of 'prior weights' to be used in the
   fitting process. Should be \code{NULL} or a numeric vector.}
 \item{robust}{Boolean used to determine whether to use a robust variance
@@ -129,8 +132,9 @@ hazards), g(S)=-log(S); for "AO" (generalised Aranda-Ordaz), g(S)=log((S^(-theta
 \item{recurrent}{logical for whether clustered, left truncated data are
   recurrent or for first event (where the latter requires an adjustment
   for the frailties or random effects)}
-\item{logtheta}{initial value for log-theta used in the gamma shared frailty
-  model}
+\item{logtheta}{initial value for log-theta used in the gamma or
+  log-normal shared frailty
+  model (defaults to an initial value from a Cox model fit)}
 \item{adaptive}{logical for whether to use adaptive or non-adaptive
   quadrature}
 \item{maxkappa}{double float value for the maximum value of the weight

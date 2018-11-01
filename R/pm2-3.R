@@ -536,17 +536,18 @@ setClass("stpm2", representation(xlevels="list",
                                  ),
          contains="mle2")
 stpm2 <- function(formula, data, smooth.formula = NULL, smooth.args = NULL,
-                     df = 3, cure = FALSE, logH.args = NULL, logH.formula = NULL,
-                     tvc = NULL, tvc.formula = NULL,
-                     control = list(parscale = 1, maxit = 300), init = NULL,
-                     coxph.strata = NULL, weights = NULL, robust = FALSE, baseoff = FALSE, 
+                  df = 3, cure = FALSE, logH.args = NULL, logH.formula = NULL,
+                  tvc = NULL, tvc.formula = NULL,
+                  control = list(parscale = 1, maxit = 300), init = NULL,
+                  coxph.strata = NULL, coxph.formula = NULL,
+                  weights = NULL, robust = FALSE, baseoff = FALSE, 
                   bhazard = NULL, bhazinit=0.1, timeVar = "", time0Var = "", use.gr = TRUE,
                   optimiser=c("BFGS","NelderMead"), log.time.transform=TRUE,
-                     reltol=1.0e-8, trace = 0,
-                     link.type=c("PH","PO","probit","AH","AO"), theta.AO=0, 
-                  frailty = !is.null(cluster) & !robust, cluster = NULL, logtheta=-6, nodes=9, RandDist=c("Gamma","LogN"), recurrent = FALSE,
+                  reltol=1.0e-8, trace = 0,
+                  link.type=c("PH","PO","probit","AH","AO"), theta.AO=0, 
+                  frailty = !is.null(cluster) & !robust, cluster = NULL, logtheta=NULL, nodes=9, RandDist=c("Gamma","LogN"), recurrent = FALSE,
                   adaptive = TRUE, maxkappa = 1e3, Z = ~1,
-                     contrasts = NULL, subset = NULL, robust_initial=FALSE, ...) {
+                  contrasts = NULL, subset = NULL, robust_initial=FALSE, ...) {
     link.type <- match.arg(link.type)
     link <- switch(link.type,PH=link.PH,PO=link.PO,probit=link.probit,AH=link.AH,AO=link.AO(theta.AO))
     RandDist <- match.arg(RandDist)
@@ -577,9 +578,14 @@ stpm2 <- function(formula, data, smooth.formula = NULL, smooth.args = NULL,
         logH.args$df <- df
         if (cure) logH.args$cure <- cure
     }
-    if (is.null(logH.formula))
-      logH.formula <- as.formula(call("~",as.call(c(quote(nsx),call("log",timeExpr),
-                                                    vector2call(logH.args)))))
+    if (is.null(logH.formula)) {
+        logH.formula <- as.formula(call("~",as.call(c(quote(nsx),call("log",timeExpr),
+                                                      vector2call(logH.args)))))
+        if (link.type=="AH")
+            logH.formula <- as.formula(call("~",as.call(c(quote(nsx),timeExpr,
+                                                          vector2call(logH.args))) %call+%
+                                                as.call(c(as.name(":"),rhs(formula),timeExpr))))
+          }
     if (is.null(tvc.formula) && !is.null(tvc)) {
       tvc.formulas <-
         lapply(names(tvc), function(name)
@@ -606,12 +612,25 @@ stpm2 <- function(formula, data, smooth.formula = NULL, smooth.args = NULL,
     ## ensure that data is a data frame
     ## data <- get_all_vars(full.formula, data) # but this loses the other design information
     ## restrict to non-missing data (assumes na.action=na.omit)
+    na.action.old <- options()[["na.action"]]
+    options(na.action = "na.pass")
+    on.exit(options(na.action = na.action.old))
     subset.expr <- substitute(subset)
     if(class(subset.expr)=="NULL") subset.expr <- TRUE
-    .include <- apply(model.matrix(formula, data, na.action = na.pass), 1, function(row) !any(is.na(row))) &
-        !is.na(eval(eventExpr,data)) & !is.na(eval(timeExpr,data)) & eval(subset.expr,data)
+    .include <- complete.cases(model.matrix(formula, data)) &
+        !is.na(eval(eventExpr,data,parent.frame())) &
+        eval(subset.expr,data,parent.frame())
+    options(na.action = na.action.old)
     if (!interval)
-        data <- data[.include, , drop=FALSE]
+        .include <- .include & !is.na(eval(timeExpr,data,parent.frame())) 
+    time0Expr <- NULL # initialise
+    if (delayed) {
+        time0Expr <- lhs(formula)[[2]]
+        .include <- .include & !is.na(eval(time0Expr,data,parent.frame()))
+    }
+    if (!is.null(substitute(weights)))
+        .include <- .include & !is.na(eval(substitute(weights),data,parent.frame()))
+    data <- data[.include, , drop=FALSE]
     ##
     ## parse the function call
     Call <- match.call()
@@ -621,18 +640,16 @@ stpm2 <- function(formula, data, smooth.formula = NULL, smooth.args = NULL,
     mf <- mf[c(1L, m)]
     ##
     ## get variables
-    time <- eval(timeExpr, data, parent.frame())
-    if (any(time>0 & time<1e-4))
-        warning("Some event times < 1e-4: consider transforming time to avoid problems with finite differences")
-    time0Expr <- NULL # initialise
     if (delayed) {
-      time0Expr <- lhs(formula)[[2]]
       if (time0Var == "")
         time0Var <- all.vars(time0Expr)
       time0 <- eval(time0Expr, data, parent.frame())
-      if (any(time0>0 & time0<1e-4))
-          warning("Some entry times < 1e-4: consider transforming time to avoid problems with finite differences")
+      if (any(time0>0 & time0<1e-6))
+          warning("Some entry times < 1e-6: consider transforming time to avoid problems with finite differences")
     }
+    time <- eval(timeExpr, data, parent.frame())
+    if (any(time>0 & time<1e-6))
+        warning("Some event times < 1e-6: consider transforming time to avoid problems with finite differences")
     event <- eval(eventExpr,data)
     ## if all the events are the same, we assume that they are all events, else events are those greater than min(event)
     if (!interval)
@@ -642,18 +659,36 @@ stpm2 <- function(formula, data, smooth.formula = NULL, smooth.args = NULL,
         ## Cox regression
         coxph.call <- mf
         coxph.call[[1L]] <- as.name("coxph")
+        coxph.call$subset <- .include
         coxph.strata <- substitute(coxph.strata)
+        coxph.call$data <- quote(coxph.data)
+        coxph.data <- data
+        if (!is.null(coxph.formula)) {
+            coxph.formula2 <- coxph.call$formula
+            rhs(coxph.formula2) <- rhs(formula) %call+% rhs(coxph.formula)
+            coxph.call$formula <- coxph.formula2
+        }
         if (!is.null(coxph.strata)) {
-            coxph.formula <- formula
-            rhs(coxph.formula) <- rhs(formula) %call+% call("strata",coxph.strata)
-            coxph.call$formula <- coxph.formula
+            coxph.formula2 <- coxph.call$formula
+            rhs(coxph.formula2) <- rhs(formula) %call+% call("strata",coxph.strata)
+            coxph.call$formula <- coxph.formula2
         }
         coxph.call$model <- TRUE
-        coxph.obj <- eval(coxph.call, envir=parent.frame())
+        coxph.obj <- eval(coxph.call, coxph.data)
         y <- model.extract(model.frame(coxph.obj),"response")
         data$logHhat <- if (is.null(bhazard)) {
                             pmax(-18,link$link(Shat(coxph.obj)))
                         } else  pmax(-18,link$link(Shat(coxph.obj)/exp(-bhazinit*bhazard*time)))
+        if (frailty && is.null(logtheta)) {
+            coxph.data$.cluster <- as.vector(unclass(factor(cluster)))[.include]
+            coxph.formula <- coxph.call$formula
+            rhs(coxph.formula) <- rhs(coxph.formula) %call+%
+                call("frailty",as.name(".cluster"),
+                     distribution=switch(RandDist,LogN="gaussian",Gamma="gamma"))
+            coxph.call$formula <- coxph.formula
+            coxph.obj <- eval(coxph.call, envir=parent.frame())
+            logtheta <- log(coxph.obj$history[[1]]$theta)
+        }
     }
     if (interval) {
         ## survref regression
@@ -664,6 +699,10 @@ stpm2 <- function(formula, data, smooth.formula = NULL, smooth.args = NULL,
         weibullScale <- predict(survreg.obj)
         y <- model.extract(model.frame(survreg.obj),"response")
         data$logHhat <- pmax(-18,link$link(pweibull(time,weibullShape,weibullScale,lower.tail=FALSE)))
+        ##
+        if (frailty && is.null(logtheta)) {
+            logtheta <- -1
+        }
     }
     ##
     ## initial values and object for lpmatrix predictions
@@ -725,7 +764,7 @@ stpm2 <- function(formula, data, smooth.formula = NULL, smooth.args = NULL,
             init <- init[index0]
         }
         X <- transX(X,data)
-        XD <- grad1(lpfunc,data[[timeVar]],lm.obj,data,timeVar,log.transform=log.time.transform)
+        XD <- transXD(grad1(lpfunc,data[[timeVar]],lm.obj,data,timeVar,log.transform=log.time.transform))
         ## XD <- grad(lpfunc,0,lm.obj,data,timeVar)
         ## XD <- transXD(matrix(XD,nrow=nrow(X)))
         X1 <- matrix(0,nrow(X),ncol(X))
@@ -777,10 +816,10 @@ stpm2 <- function(formula, data, smooth.formula = NULL, smooth.args = NULL,
     names(parscale) <- names(init)
     args <- list(init=init,X=X,XD=XD,bhazard=bhazard,wt=wt,event=ifelse(event,1,0),time=time,
                  delayed=delayed, interval=interval, X0=X0, wt0=wt0, X1=X1, parscale=parscale, reltol=reltol,
-                 kappa=1, trace = trace, oldcluster=cluster, frailty=frailty, cluster=if(!is.null(cluster)) as.vector(unclass(factor(cluster))) else NULL, map0 = map0 - 1L, ind0 = ind0, which0 = which0 - 1L, link=link.type, ttype=ttype,
+                 kappa=1, trace = trace, oldcluster=cluster, frailty=frailty, cluster=if(!is.null(cluster)) as.vector(unclass(factor(cluster)))[.include] else NULL, map0 = map0 - 1L, ind0 = ind0, which0 = which0 - 1L, link=link.type, ttype=ttype,
                  RandDist=RandDist, optimiser=optimiser, log.time.transform=log.time.transform,
                  type=if (frailty && RandDist=="Gamma") "stpm2_gamma_frailty" else if (frailty && RandDist=="LogN") "stpm2_normal_frailty" else "stpm2", recurrent = recurrent, return_type="optim", transX=transX, transXD=transXD, maxkappa=maxkappa, Z=Z, Z.formula = Z.formula, thetaAO = theta.AO, excess=excess, data=data,
-                 robust_initial = robust_initial)
+                 robust_initial = robust_initial, .include=.include)
     if (frailty) {
         rule <- fastGHQuad::gaussHermiteData(nodes)
         args$gauss_x <- rule$x
@@ -822,14 +861,47 @@ stpm2 <- function(formula, data, smooth.formula = NULL, smooth.args = NULL,
     }
     parnames(negll) <- parnames(gradnegll) <- names(init)
     ## MLE
+    if (frailty) { # first fit without the frailty
+        args2 <- args
+        args2$frailty <- FALSE
+        args2$cluster <- NULL
+        args2$type <- "stpm2"
+        localIndex <- 1:(length(args2$init)-1)
+        args2$init <- args2$init[localIndex]
+        args2$parscale <- args2$parscale[localIndex]
+        fit <- .Call("model_output", args2, PACKAGE="rstpm2")
+        rm(args2)
+        args$init <- c(fit$coef,logtheta)
+    }
     fit <- .Call("model_output", args, PACKAGE="rstpm2")
     args$init <- coef <- as.vector(fit$coef)
     args$kappa.final <- fit$kappa
     hessian <- fit$hessian
     names(coef) <- rownames(hessian) <- colnames(hessian) <- names(init)
     mle2 <- if (use.gr) mle2(negll, coef, vecpar=TRUE, control=control, gr=gradnegll, ..., eval.only=TRUE) else mle2(negll, coef, vecpar=TRUE, control=control, ..., eval.only=TRUE)
-    mle2@vcov <- if (!inherits(vcov <- try(solve(hessian)), "try-error")) vcov else matrix(NA,length(coef), length(coef))
     mle2@details$convergence <- fit$fail # fit$itrmcd
+    if (inherits(vcov <- try(solve(hessian)), "try-error")) {
+        if (optimiser=="NelderMead") {
+            warning("Non-invertible Hessian")
+            mle2@vcov <- matrix(NA,length(coef), length(coef))
+        }
+        if (optimiser!="NelderMead") {
+            warning("Non-invertible Hessian - refitting with Nelder-Mead")
+            args$optimiser <- "NelderMead"
+            fit <- .Call("model_output", args, PACKAGE="rstpm2")
+            args$init <- coef <- as.vector(fit$coef)
+            args$kappa.final <- fit$kappa
+            hessian <- fit$hessian
+            names(coef) <- rownames(hessian) <- colnames(hessian) <- names(init)
+            mle2 <- mle2(negll, coef, vecpar=TRUE, control=control, ..., eval.only=TRUE)
+            mle2@vcov <- if (!inherits(vcov <- try(solve(hessian)), "try-error")) vcov else matrix(NA,length(coef), length(coef))
+            mle2@details$convergence <- fit$fail # fit$itrmcd
+            if (inherits(vcov <- try(solve(hessian)), "try-error"))
+                warning("Non-invertible Hessian - refitting failed") 
+        }
+    } else {
+        mle2@vcov <- vcov
+    }
     out <- new("stpm2",
                call = mle2@call,
                call.orig = mle2@call,
@@ -870,18 +942,21 @@ stpm2 <- function(formula, data, smooth.formula = NULL, smooth.args = NULL,
       out@vcov <- sandwich.stpm2(out, cluster=cluster)
     return(out)
   }
-## summary.mle is not exported from bbmle
-## .__C__summary.mle2 <- bbmle::.__C__summary.mle2 # hack suggested from http://stackoverflow.com/questions/28871632/how-to-resolve-warning-messages-metadata-object-not-found-spatiallinesnull-cla
-setClass("summary.stpm2", representation(frailty="logical",theta="list",wald="matrix",args="list"), contains="summary.mle2")
-## setAs("summary.stpm2", "summary.mle2",
-##       function(from,to) new("summary.mle2", call=from@call, coef=from@call, m2logL=from@m2logL))
-## setMethod("show", "stpm2", function(object) show(as(object,"mle2")))
+setMethod("show", "stpm2",
+          function(object) {
+              object@call.orig <- object@Call
+              show(as(object,"mle2"))
+              })
+setClass("summary.stpm2",
+         representation(frailty="logical",theta="list",wald="matrix",args="list"),
+         contains="summary.mle2")
 corrtrans <- function(x) (1-exp(-x)) / (1+exp(-x))
 setMethod("summary", "stpm2",
           function(object) {
               newobj <- as(summary(as(object,"mle2")),"summary.stpm2")
               newobj@args <- object@args
               newobj@frailty <- object@frailty
+              newobj@call <- object@Call
               if (object@frailty && !is.matrix(object@args$Z)) {
                   coef <- coef(newobj)
                   theta <- exp(coef[nrow(coef),1])
@@ -974,42 +1049,61 @@ residuals.stpm2.base <- function(object, type=c("li","gradli")) {
     if (type=="li") {
         localargs <- args
         localargs$return_type <- "li"
-        return(as.vector(.Call("model_output", localargs, PACKAGE="rstpm2")))
+        out <- as.vector(.Call("model_output", localargs, PACKAGE="rstpm2"))
+        names(out) <- rownames(args$X)
     }
     if (type=="gradli") {
         localargs <- args
         localargs$return_type <- "gradli"
-        return(.Call("model_output", localargs, PACKAGE="rstpm2"))
+        out <- .Call("model_output", localargs, PACKAGE="rstpm2")
+        dimnames(out) <- dimnames(args$X)
     }
+    return(out)
 }    
 setMethod("residuals", "stpm2",
           function(object, type=c("li","gradli"))
-              residuals.stpm2.base(object=object, type=type))   
+              residuals.stpm2.base(object=object, type=match.arg(type)))
 
 predict.stpm2.base <- 
-          function(object,newdata=NULL,
+          function(object, newdata=NULL,
                    type=c("surv","cumhaz","hazard","density","hr","sdiff","hdiff","loghazard","link","meansurv","meansurvdiff","meanhr","odds","or","margsurv","marghaz","marghr","meanhaz","af","fail","margfail","meanmargsurv","uncured","rmst","probcure"),
-                   grid=FALSE,seqLength=300,
-                   type.relsurv=c("excess","total","other"), ratetable = survival::survexp.us, rmap=list(), scale=365.24,
-                   se.fit=FALSE,link=NULL,exposed=NULL,var=NULL,keep.attributes=FALSE,use.gr=TRUE,level=0.95,n.gauss.quad=100,...)
+                   grid=FALSE, seqLength=300,
+                   type.relsurv=c("excess","total","other"), ratetable = survival::survexp.us,
+                   rmap, scale=365.24,
+                   se.fit=FALSE, link=NULL, exposed=NULL, var=NULL, keep.attributes=FALSE,
+                   use.gr=TRUE, level=0.95, n.gauss.quad=100, full=FALSE, ...)
 {
     type <- match.arg(type)
     type.relsurv <- match.arg(type.relsurv)
     args <- object@args
+    if (type %in% c("fail","margfail")) {
+        out <- 1-predict.stpm2.base(object, newdata=newdata,
+                                    type=switch(type, fail="surv", margfail="margsurv"),
+                                    grid=grid, seqLength=seqLength, type.relsurv=type.relsurv,
+                                    ratetable=ratetable, rmap=rmap, scale=scale,
+                                    se.fit=se.fit, link=link, exposed=exposed,
+                                    var=var, keep.attributes=keep.attributes,
+                                    use.gr=use.gr, level=level, n.gauss.quad=n.gauss.quad,
+                                    full=full, ...)
+        if (se.fit) {temp <- out$lower; out$lower <- out$upper; out$upper <- temp}
+        return(out)
+    }
     if (is.null(link)) {
         if(args$excess){
             link <- switch(type, surv = "log", cumhaz = "I",
                            hazard = "I", hr = "I", sdiff = "I", hdiff = "I",
                            loghazard = "I", link = "I", odds = "log", or = "log",
                            margsurv = "log", marghaz = "I", marghr = "I",
-                           meansurv = "I", meanhr = "I", meanhaz = "I", af = "I", uncured = "log",
+                           meansurv = "I", meanhr = "I", meanhaz = "I", af = "I",
+                           fail = "cloglog", uncured = "log",
                            rmst = "I", probcure = "cloglog")
         } else {
             link <- switch(type, surv = "cloglog", cumhaz = "log",
                            hazard = "log", hr = "log", sdiff = "I", hdiff = "I",
                            loghazard = "I", link = "I", odds = "log", or = "log",
                            margsurv = "cloglog", marghaz = "log", marghr = "log",
-                           meansurv = "I", meanhr="log", meanhaz = "I", af = "I", uncured = "cloglog",
+                           meansurv = "I", meanhr="log", meanhaz = "I", af = "I",
+                           fail = "cloglog", uncured = "cloglog",
                            rmst = "I", probcure = "cloglog")
         }
     }
@@ -1017,12 +1111,7 @@ predict.stpm2.base <-
     linkf <- eval(parse(text=link))
     if (type %in% c("uncured","probcure") && is.null(exposed))
         exposed <- function(data) data[[object@timeVar]] <- max(args$time[args$event])
-    if (type %in% c("fail","margfail")) {
-        out <- 1-predict.stpm2.base(object,newdata=newdata,type=switch(type, fail="surv", margfail="margsurv"),grid,seqLength,se.fit,link,exposed,var,keep.attributes,use.gr,...)
-        if (se.fit) {temp <- out$lower; out$lower <- out$upper; out$upper <- temp}
-        return(out)
-    }
-      if (is.null(exposed) && is.null(var) & type %in% c("hr","sdiff","hdiff","meansurvdiff","meanhr","or","marghr","af","uncured","probcure"))
+    if (is.null(exposed) && is.null(var) & type %in% c("hr","sdiff","hdiff","meansurvdiff","meanhr","or","marghr","af","uncured","probcure"))
           stop('Either exposed or var required for type in ("hr","sdiff","hdiff","meansurvdiff","meanhr","or","marghr","af","uncured","probcure")')
       if (type %in% c('margsurv','marghaz','marghr','margfail','meanmargsurv') && !object@args$frailty)
           stop("Marginal prediction only for frailty models")
@@ -1042,7 +1131,8 @@ predict.stpm2.base <-
         newdata <- as.data.frame(object@data)
     }
     newdata2 <- NULL
-    lpfunc <- if (inherits(object,"pstpm2")) 
+    lpfunc <- function(newdata)
+        if (inherits(object,"pstpm2")) 
         function(x,...) {
             newdata2 <- newdata
             newdata2[[object@timeVar]] <- x
@@ -1083,32 +1173,36 @@ predict.stpm2.base <-
         newdata[[object@timeVar]] <- time
         calcX <- TRUE
     }
-    if (args$excess && type.relsurv != "excess") {
+    if (args$excess) {
         ## rmap <- substitute(rmap)
+      if(type.relsurv != "excess"){
         Sstar <- do.call(survexp, list(substitute(I(timeVar*scale)~1,list(timeVar=as.name(object@timeVar))),
                                        ratetable=ratetable,
                                        scale=scale,
-                                       rmap=rmap,
+                                       rmap=substitute(rmap),
                                        cohort=FALSE,
                                        data=newdata))
+        Hstar <- -log(Sstar)
         if (!is.null(newdata2))
-            Sstar2 <- do.call(survexp, list(substitute(I(timeVar*scale)~1,list(timeVar=as.name(object@timeVar))),
-                                            ratetable=ratetable,
-                                            scale=scale,
-                                            rmap=rmap,
-                                            cohort=FALSE,
-                                            data=newdata2))
+          Sstar2 <- do.call(survexp, list(substitute(I(timeVar*scale)~1,list(timeVar=as.name(object@timeVar))),
+                                          ratetable=ratetable,
+                                          scale=scale,
+                                          rmap=rmap,
+                                          cohort=FALSE,
+                                          data=newdata2))
+        Hstar <- -log(Sstar)
+      } 
     }
     if (calcX)  {
       if (inherits(object, "stpm2")) {
           X <- object@args$transX(lpmatrix.lm(object@lm, newdata), newdata)
-          XD <- grad1(lpfunc,newdata[[object@timeVar]],
+          XD <- grad1(lpfunc(newdata),newdata[[object@timeVar]],
                       log.transform=object@args$log.time.transform)
           XD <- object@args$transXD(XD)
       }
       if (inherits(object, "pstpm2")) {
            X <- object@args$transX(predict(object@gam, newdata, type="lpmatrix"), newdata)      
-           XD <- object@args$transXD(grad1(lpfunc,newdata[[object@timeVar]],
+           XD <- object@args$transXD(grad1(lpfunc(newdata),newdata[[object@timeVar]],
                                            log.transform=object@args$log.time.transform))
       }
         ## X <- args$transX(lpmatrix.lm(object@lm, newdata), newdata)
@@ -1134,13 +1228,13 @@ predict.stpm2.base <-
         newdata2 <- exposed(newdata)
       if (inherits(object, "stpm2")) {
           X2 <- object@args$transX(lpmatrix.lm(object@lm, newdata2), newdata2)
-          XD2 <- grad1(lpfunc,newdata2[[object@timeVar]],
+          XD2 <- grad1(lpfunc(newdata2),newdata2[[object@timeVar]],
                        log.transform=object@args$log.time.transform)
-          XD2 <- object@args$transXD(XD)
+          XD2 <- object@args$transXD(XD2)
       }
       if (inherits(object, "pstpm2")) {
            X2 <- object@args$transX(predict(object@gam, newdata2, type="lpmatrix"), newdata2)      
-           XD2 <- object@args$transXD(grad1(lpfunc,newdata2[[object@timeVar]],
+           XD2 <- object@args$transXD(grad1(lpfunc(newdata2),newdata2[[object@timeVar]],
                                             log.transform=object@args$log.time.transform))
       }
         ## X2 <- args$transX(lpmatrix.lm(object@lm, newdata2), newdata2)
@@ -1300,7 +1394,7 @@ predict.stpm2.base <-
         etaD <- as.vector(XD %*% beta)
         S <- link$ilink(eta)
         h <- link$h(eta,etaD)
-        if (!object@args$excess && any(h<0)) warning(sprintf("Predicted hazards less than zero (n=%i).",sum(h<0)))
+        if (!object@args$excess && any(ifelse(is.na(h),FALSE,h<0))) warning(sprintf("Predicted hazards less than zero (n=%i).",sum(ifelse(is.na(h),FALSE,h<0))))
         H = link$H(eta)
         Sigma = vcov(object)
         if (!args$excess) type.relsurv <- "excess" ## ugly hack
@@ -1315,7 +1409,7 @@ predict.stpm2.base <-
             ##     return(H - H0)
             ## }
             ## else 
-                return(H)
+            return(switch(type.relsurv,excess=H,total=H+Hstar,other=Hstar))
         }
         if (type=="density")
             return (S*h)
@@ -1323,7 +1417,7 @@ predict.stpm2.base <-
           return(switch(type.relsurv,excess=S,total=S*Sstar,other=Sstar))
         }
         if (type=="fail") {
-          return(1-S)
+          return(switch(type.relsurv, excess=1-S,total=1-S*Sstar, other=1-Sstar))
         }
         if (type=="odds") { # delayed entry?
           return((1-S)/S)
@@ -1348,7 +1442,7 @@ predict.stpm2.base <-
         }
         if (type=="probcure") {
             S2 <- link$ilink(as.vector(X2 %*% beta))
-            S2/S
+            return(S2/S)
         }
         if (type=="hr") {
             eta2 <- as.vector(X2 %*% beta)
@@ -1464,7 +1558,7 @@ predict.stpm2.base <-
         }
     }
     if (!se.fit) {
-      out <- local(object,newdata,type=type,exposed=exposed,  ...)
+        out <- local(object,newdata,type=type,exposed=exposed,  ...)
     } else {
       gd <- NULL
       beta <- coef(object)
@@ -1577,18 +1671,23 @@ predict.stpm2.base <-
     }
     if (keep.attributes)
         attr(out,"newdata") <- newdata
+    if (full) 
+        out <- if(is.data.frame(out)) cbind(newdata,out) else cbind(newdata, data.frame(Estimate=out))
     return(out)
-  }
+}
 
 setMethod("predict", "stpm2",
           function(object,newdata=NULL,
                    type=c("surv","cumhaz","hazard","density","hr","sdiff","hdiff","loghazard","link","meansurv","meansurvdiff","meanhr","odds","or","margsurv","marghaz","marghr","meanhaz","af","fail","margfail","meanmargsurv","uncured","rmst","probcure"),
                    grid=FALSE,seqLength=300,
-                   type.relsurv=c("excess","total","other"), scale=365.24, rmap=list(), ratetable=survival::survexp.us,
-                   se.fit=FALSE,link=NULL,exposed=incrVar(var),var=NULL,keep.attributes=FALSE,use.gr=TRUE,level=0.95,...)
-              predict.stpm2.base(object=object, newdata=newdata, type=type, grid=grid, seqLength=seqLength, se.fit=se.fit,
+                   type.relsurv=c("excess","total","other"), scale=365.24, rmap, ratetable=survival::survexp.us,
+                   se.fit=FALSE,link=NULL,exposed=incrVar(var),var=NULL,keep.attributes=FALSE,use.gr=TRUE,level=0.95,n.gauss.quad=100,full=FALSE,...) {
+              type <- match.arg(type)
+              type.relsurv <- match.arg(type.relsurv)
+              predict.stpm2.base(object, newdata=newdata, type=type, grid=grid, seqLength=seqLength, se.fit=se.fit,
                                  link=link, exposed=exposed, var=var, keep.attributes=keep.attributes, use.gr=use.gr,level=level,
-                                 type.relsurv=type.relsurv, scale=scale, rmap=substitute(rmap), ratetable=ratetable, ...))
+                                 type.relsurv=type.relsurv, scale=scale, rmap=rmap, ratetable=ratetable, n.gauss.quad=n.gauss.quad, full=full, ...)
+          })
 
 ##`%c%` <- function(f,g) function(...) g(f(...)) # function composition
 plot.meansurv <- function(x, y=NULL, times=NULL, newdata=NULL, type="meansurv", exposed=NULL, var=NULL, add=FALSE, ci=!add, rug=!add, recent=FALSE,
@@ -1656,14 +1755,16 @@ plot.stpm2.base <-
           function(x,y,newdata=NULL,type="surv",
                    xlab=NULL,ylab=NULL,line.col=1,ci.col="grey",lty=par("lty"),log="",
                    add=FALSE,ci=!add,rug=!add,
-                   var=NULL,exposed=incrVar(var),times=NULL,...) {
+                   var=NULL,exposed=incrVar(var),times=NULL,
+                   type.relsurv=c("excess","total","other"), ratetable = survival::survexp.us, rmap, scale=365.24, ...) {
               if (type %in% c("meansurv","meansurvdiff","af","meanhaz","meanhr")) {
                   return(plot.meansurv(x,times=times,newdata=newdata,type=type,xlab=xlab,ylab=ylab,line.col=line.col,ci.col=ci.col,
                                        lty=lty,add=add,ci=ci,rug=rug, exposed=exposed, ...))
               }
               if (is.null(newdata)) stop("newdata argument needs to be specified")
               y <- predict(x,newdata,type=switch(type,fail="surv",margfail="margsurv",type),var=var,exposed=exposed,
-                           grid=!(x@timeVar %in% names(newdata)), se.fit=ci, keep.attributes=TRUE)
+                           grid=!(x@timeVar %in% names(newdata)), se.fit=ci, keep.attributes=TRUE, 
+                           type.relsurv=type.relsurv, ratetable=ratetable, rmap=rmap, scale=scale)
               if (type %in% c("fail","margfail")) {
                   if (ci) {
                       y$Estimate <- 1-y$Estimate
@@ -1700,19 +1801,25 @@ setMethod("plot", signature(x="stpm2", y="missing"),
           function(x,y,newdata=NULL,type="surv",
                    xlab=NULL,ylab=NULL,line.col=1,ci.col="grey",lty=par("lty"),
                    add=FALSE,ci=!add,rug=!add,
-                   var=NULL,exposed=incrVar(var),times=NULL,...)
+                   var=NULL,exposed=incrVar(var),times=NULL,
+                   type.relsurv=c("excess","total","other"), ratetable = survival::survexp.us, 
+                   rmap, scale=365.24,...)
               plot.stpm2.base(x=x, y=y, newdata=newdata, type=type, xlab=xlab,
                               ylab=ylab, line.col=line.col, ci.col=ci.col, lty=lty, add=add,
-                              ci=ci, rug=rug, var=var, exposed=exposed, times=times, ...)
+                              ci=ci, rug=rug, var=var, exposed=exposed, times=times, 
+                              type.relsurv=type.relsurv, ratetable=ratetable, rmap=rmap, scale=scale,...)
           )
 lines.stpm2 <- 
           function(x,newdata=NULL,type="surv",
                    col=1,ci.col="grey",lty=par("lty"),
                    ci=FALSE,rug=FALSE,
-                   var=NULL,exposed=incrVar(var),times=NULL,...)
+                   var=NULL,exposed=incrVar(var),times=NULL,
+                   type.relsurv=c("excess","total","other"), ratetable = survival::survexp.us, 
+                   rmap, scale=365.24, ...)
               plot.stpm2.base(x=x, newdata=newdata, type=type, 
                               line.col=col, ci.col=ci.col, lty=lty, add=TRUE,
-                              ci=ci, rug=rug, var=var, exposed=exposed, times=times, ...)
+                              ci=ci, rug=rug, var=var, exposed=exposed, times=times, 
+                              type.relsurv=type.relsurv, ratetable=ratetable, rmap=rmap, scale=scale,...)
 setMethod("lines", signature(x="stpm2"), lines.stpm2)
 eform <- function (object, ...) 
   UseMethod("eform")
@@ -1840,7 +1947,7 @@ pstpm2 <- function(formula, data, smooth.formula = NULL, smooth.args = NULL,
                    optimiser=c("BFGS","NelderMead","Nlm"),
                    log.time.transform=TRUE,
                    recurrent = FALSE,
-                  frailty=!is.null(cluster) & !robust, cluster = NULL, logtheta=-6, nodes=9,RandDist=c("Gamma","LogN"),
+                  frailty=!is.null(cluster) & !robust, cluster = NULL, logtheta=NULL, nodes=9,RandDist=c("Gamma","LogN"),
                   adaptive=TRUE, maxkappa = 1e3, Z = ~1,
                    reltol = list(search = 1.0e-10, final = 1.0e-10, outer=1.0e-5),outer_optim=1,
                    contrasts = NULL, subset = NULL, robust_initial = FALSE, ...) {
@@ -1882,15 +1989,28 @@ pstpm2 <- function(formula, data, smooth.formula = NULL, smooth.args = NULL,
     if (timeVar == "")
       timeVar <- all.vars(timeExpr)
     ## restrict to non-missing data (assumes na.action=na.omit)
-    .include <- apply(model.matrix(formula, data, na.action = na.pass), 1, function(row) !any(is.na(row))) &
-        !is.na(eval(eventExpr,data)) & !is.na(eval(timeExpr,data))
+    na.action.old <- options()[["na.action"]]
+    options(na.action = "na.pass")
+    on.exit(options(na.action = na.action.old))
+    subset.expr <- substitute(subset)
+    if(class(subset.expr)=="NULL") subset.expr <- TRUE
+    .include <- complete.cases(model.matrix(formula, data)) &
+        !is.na(eval(eventExpr,data,parent.frame())) &
+        eval(subset.expr,data,parent.frame())
+    options(na.action = na.action.old)
     if (!interval)
-        data <- data[.include, , drop=FALSE] ### REPLACEMENT ###
-    ## we can now evaluate over data
-    time <- eval(timeExpr, data, parent.frame())
+        .include <- .include & !is.na(eval(timeExpr,data,parent.frame())) 
     time0Expr <- NULL # initialise
     if (delayed) {
-      time0Expr <- lhs(formula)[[2]]
+        time0Expr <- lhs(formula)[[2]]
+        .include <- .include & !is.na(eval(time0Expr,data,parent.frame()))
+    }
+    if (!is.null(substitute(weights)))
+        .include <- .include & !is.na(eval(substitute(weights),data,parent.frame()))
+    data <- data[.include, , drop=FALSE]
+    ## we can now evaluate over data
+    time <- eval(timeExpr, data, parent.frame())
+    if (delayed) {
       if (time0Var == "")
         time0Var <- all.vars(time0Expr)
       time0 <- eval(time0Expr, data, parent.frame())
@@ -1904,9 +2024,19 @@ pstpm2 <- function(formula, data, smooth.formula = NULL, smooth.args = NULL,
     if (is.null(smooth.formula) && is.null(logH.args)) {
       logH.args$k <- -1
     }
-    if (is.null(smooth.formula))
+    if (is.null(smooth.formula)) {
       smooth.formula <- as.formula(call("~",as.call(c(quote(s),call("log",timeExpr),
-                                                    vector2call(logH.args)))))
+                                                      vector2call(logH.args)))))
+      if (link.type=="AH") {
+          interaction <- function(expr) {
+              if (is.name(expr)) call(":",expr,timeExpr) else if(is.name(expr[[1]]) && as.character(expr[[1]])=="+") interaction(expr[[2]]) %call+% interaction(expr[[3]]) else call(":",expr,timeExpr)
+          }
+          ## interaction(rstpm2:::rhs(~a+I(b)+c-1)) # error
+          smooth.formula <-  as.formula(call("~",
+                                             interaction(rhs(formula)) %call+%
+                                             as.call(c(quote(s),timeExpr, vector2call(logH.args)))))
+      }
+    }
     if (!is.null(tvc)) {
       tvc.formulas <-
         lapply(names(tvc), function(name)
@@ -1923,8 +2053,7 @@ pstpm2 <- function(formula, data, smooth.formula = NULL, smooth.args = NULL,
     full.formula <- formula
     if(link.type=="AH"){
       rhs(full.formula) <- rhs(smooth.formula)
-    }
-    else{
+    } else{
       rhs(full.formula) <- rhs(formula) %call+% rhs(smooth.formula)
     }
       ## 
@@ -1951,13 +2080,22 @@ pstpm2 <- function(formula, data, smooth.formula = NULL, smooth.args = NULL,
             coxph.call$formula <- coxph.formula2
         }
         coxph.call$model <- TRUE
-        ## coxph.obj <- eval(coxph.call, envir=parent.frame())
         coxph.obj <- eval(coxph.call, coxph.data)
         y <- model.extract(model.frame(coxph.obj),"response")
         data$logHhat <- if (is.null(bhazard)) {
                             pmax(-18,link$link(Shat(coxph.obj)))
                         } else  pmax(-18,link$link(Shat(coxph.obj)/exp(-bhazinit*bhazard*time)))
-    }
+        if (frailty && is.null(logtheta)) {
+            coxph.data$.cluster <- as.vector(unclass(factor(cluster)))[.include]
+            coxph.formula <- coxph.call$formula
+            rhs(coxph.formula) <- rhs(coxph.formula) %call+%
+                call("frailty",as.name(".cluster"),
+                     distribution=switch(RandDist,LogN="gaussian",Gamma="gamma"))
+            coxph.call$formula <- coxph.formula
+            coxph.obj <- eval(coxph.call, enclos=parent.frame())
+            logtheta <- log(coxph.obj$history[[1]]$theta)
+        }
+   }
     if (interval) {
         ## survref regression
         survreg.call <- mf
@@ -1967,6 +2105,10 @@ pstpm2 <- function(formula, data, smooth.formula = NULL, smooth.args = NULL,
         weibullScale <- predict(survreg.obj)
         y <- model.extract(model.frame(survreg.obj),"response")
         data$logHhat <- pmax(-18,link$link(pweibull(time,weibullShape,weibullScale,lower.tail=FALSE)))
+        ##
+        if (frailty && is.null(logtheta)) {
+            logtheta <- -1
+        }
     }
     ##
     ## initial values and object for lpmatrix predictions
@@ -2111,13 +2253,13 @@ pstpm2 <- function(formula, data, smooth.formula = NULL, smooth.args = NULL,
                  sp=sp, reltol_search=reltol$search, reltol=reltol$final, reltol_outer=reltol$outer, trace=trace,
                  kappa=1.0,outer_optim=outer_optim,
                  alpha=alpha,criterion=switch(criterion,GCV=1,BIC=2),
-                 oldcluster=cluster, cluster=if(!is.null(cluster)) as.vector(unclass(factor(cluster))) else NULL, frailty=frailty,
+                 oldcluster=cluster, cluster=if(!is.null(cluster)) as.vector(unclass(factor(cluster)))[.include] else NULL, frailty=frailty,
                  map0 = map0 - 1L, ind0 = ind0, which0=which0 - 1L, link = link.type,
                  penalty = penalty, ttype=ttype, RandDist=RandDist, optimiser=optimiser,
                  log.time.transform=log.time.transform,
                  type=if (frailty && RandDist=="Gamma") "pstpm2_gamma_frailty" else if (frailty && RandDist=="LogN") "pstpm2_normal_frailty" else "pstpm2", recurrent = recurrent, maxkappa=maxkappa,
                  transX=transX, transXD=transXD, Z.formula = Z, thetaAO = theta.AO, excess=excess,
-                 return_type="optim", data=data, robust_initial=robust_initial)
+                 return_type="optim", data=data, robust_initial=robust_initial, .include=.include)
     if (frailty) {
         rule <- fastGHQuad::gaussHermiteData(nodes)
         args$gauss_x <- rule$x
@@ -2267,6 +2409,18 @@ pstpm2 <- function(formula, data, smooth.formula = NULL, smooth.args = NULL,
     } else {
         "optim_first"
     }
+    if (frailty) { # first fit without the frailty
+        args2 <- args
+        args2$frailty <- FALSE
+        args2$cluster <- NULL
+        args2$type <- "pstpm2"
+        localIndex <- 1:(length(args2$init)-1)
+        args2$init <- args2$init[localIndex]
+        args2$parscale <- args2$parscale[localIndex]
+        fit <- .Call("model_output", args2, PACKAGE="rstpm2")
+        rm(args2)
+        args$init <- c(fit$coef,logtheta)
+    }
     fit <- .Call("model_output", args, PACKAGE = "rstpm2")
     fit$coef <- as.vector(fit$coef)
     fit$sp <- as.vector(fit$sp)
@@ -2284,10 +2438,31 @@ pstpm2 <- function(formula, data, smooth.formula = NULL, smooth.args = NULL,
     mle2 <- if (use.gr) {
             mle2(negll,init,vecpar=TRUE, control=control, gr=gradnegll, eval.only=TRUE, ...)
         } else mle2(negll,init,vecpar=TRUE, control=control, eval.only=TRUE, ...)
-    mle2@details$hessian <- fit$hessian
+    hessian <- mle2@details$hessian <- fit$hessian
     ## mle2@vcov <- solve(optimHess(coef(mle2),negll,gradnegll))
-    mle2@vcov <- solve(fit$hessian)
     mle2@details$convergence <- 0
+    if (inherits(vcov <- try(solve(hessian)), "try-error")) {
+        if (optimiser=="NelderMead") {
+            warning("Non-invertible Hessian")
+            mle2@vcov <- matrix(NA,length(coef), length(coef))
+        }
+        if (optimiser!="NelderMead") {
+            warning("Non-invertible Hessian - refitting with Nelder-Mead")
+            args$optimiser <- "NelderMead"
+            fit <- .Call("model_output", args, PACKAGE="rstpm2")
+            args$init <- coef <- as.vector(fit$coef)
+            args$kappa.final <- fit$kappa
+            hessian <- fit$hessian
+            names(coef) <- rownames(hessian) <- colnames(hessian) <- names(init)
+            mle2 <- mle2(negll, coef, vecpar=TRUE, control=control, ..., eval.only=TRUE)
+            mle2@vcov <- if (!inherits(vcov <- try(solve(hessian)), "try-error")) vcov else matrix(NA,length(coef), length(coef))
+            mle2@details$convergence <- fit$fail # fit$itrmcd
+            if (inherits(vcov, "try-error"))
+                    warning("Non-invertible Hessian - refitting failed") 
+        }
+    } else {
+        mle2@vcov <- vcov
+        }
     out <- new("pstpm2",
                call = mle2@call,
                call.orig = mle2@call,
@@ -2357,6 +2532,7 @@ setMethod("summary", "pstpm2",
               newobj <- as(summary(as(object,"mle2")),"summary.pstpm2")
               newobj@pstpm2 <- object
               newobj@frailty <- object@frailty
+              newobj@call <- object@Call
               if (object@frailty) {
                   coef <- coef(newobj)
                   theta <- exp(coef[nrow(coef),1])
@@ -2480,6 +2656,11 @@ setMethod("eform", signature(object="pstpm2"),
               colnames(val) <- c(name, colnames(val)[-1])
               val[parm, ]
           })
+setMethod("show", "pstpm2",
+          function(object) {
+              object@call.orig <- object@Call
+              show(as(object,"mle2"))
+              })
 
 ## Revised from bbmle:
 ## changed the calculation of the degrees of freedom in the third statement of the .local function
@@ -2544,13 +2725,15 @@ setMethod("predict", "pstpm2",
           function(object,newdata=NULL,
                    type=c("surv","cumhaz","hazard","density","hr","sdiff","hdiff","loghazard","link","meansurv","meansurvdiff","meanhr","odds","or","margsurv","marghaz","marghr","meanhaz","af","fail","margfail","meanmargsurv","rmst"),
                    grid=FALSE,seqLength=300,
-                   se.fit=FALSE,link=NULL,exposed=incrVar(var),var=NULL,keep.attributes=FALSE,use.gr=TRUE,level=0.95, ...)
+                   se.fit=FALSE,link=NULL,exposed=incrVar(var),var=NULL,keep.attributes=FALSE,use.gr=TRUE,level=0.95, n.gauss.quad=100, full=FALSE, ...) {
+              type <- match.arg(type)
               predict.stpm2.base(object=object, newdata=newdata, type=type, grid=grid, seqLength=seqLength, se.fit=se.fit,
-                                 link=link, exposed=exposed, var=var, keep.attributes=keep.attributes, use.gr=use.gr, level=level, ...))
+                                 link=link, exposed=exposed, var=var, keep.attributes=keep.attributes, use.gr=use.gr, level=level, n.gauss.quad=n.gauss.quad, full=full, ...)
+              })
 
 setMethod("residuals", "pstpm2",
           function(object, type=c("li","gradli"))
-              residuals.stpm2.base(object=object, type=type))
+              residuals.stpm2.base(object=object, type=match.arg(type)))
 
 ##`%c%` <- function(f,g) function(...) g(f(...)) # function composition
 ## to do:
@@ -2706,3 +2889,8 @@ function (x, width = 0.9 * getOption("width"), indent = 0, exdent = 0,
     y <- unlist(y)
   y
 }
+
+## S3 methods
+coef.pstpm2 <- coef.stpm2 <- coef
+vcov.pstpm2 <- vcov.stpm2 <- vcov
+

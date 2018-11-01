@@ -11,7 +11,9 @@ S3 methods for lines
 \usage{
 \method{lines}{stpm2}(x, newdata = NULL, type = "surv", col = 1, ci.col= "grey",
 lty = par("lty"), ci = FALSE, rug = FALSE, var = NULL,
-exposed = incrVar(var), times = NULL, ...)
+exposed = incrVar(var), times = NULL,
+type.relsurv = c("excess", "total", "other"),
+ratetable = survival::survexp.us, rmap, scale = 365.24, ...)
 \method{lines}{pstpm2}(x, newdata = NULL, type = "surv", col = 1,
 ci.col= "grey",
 lty = par("lty"), ci = FALSE, rug = FALSE, var = NULL,
@@ -36,6 +38,14 @@ exposed = incrVar(var), times = NULL, ...)
     dataset. By default, this increments \code{var}}
   \item{times}{specifies the times. By default, this uses a span of the
                       observed times.}
+  \item{type.relsurv}{type of predictions for relative survival models:
+               either "excess", "total" or "other"}
+  \item{scale}{scale to go from the days in the \code{ratetable} object
+    to the analysis time used in the analysis}
+  \item{rmap}{an optional list that maps data set names to the ratetable
+          names. See \code{survexp}}
+  \item{ratetable}{a table of event rates used in relative survival when
+               \code{type.relsurv} is "total" or "other"}
   \item{\dots}{additional arguments (add to the \code{plot} command)}
 }
 %% \details{
