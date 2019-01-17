@@ -18,6 +18,25 @@
 ##   require(bbmle)
 ## }
 
+## testing - Bug requires loading devtools *before* rstpm2
+setwd("~/src/R/rstpm2")
+library(devtools)
+devtools::test()
+
+
+## values for the tests
+library(rstpm2)
+brcancer2 <- transform(rstpm2::brcancer, w=1)
+brcancer2$w[1] <- NA
+fit1 <- stpm2(Surv(rectime,censrec==1)~hormon,data=brcancer2,weights=w)
+nd <- data.frame(hormon=1,rectime=1000)
+predict(fit1, newdata=nd, type="surv")
+predict(fit1, newdata=nd, type="fail")
+predict(fit1, newdata=nd, type="haz")
+predict(fit1, newdata=nd, type="hr",var="hormon")
+predict(fit1, newdata=nd, type="hdiff", var="hormon")
+
+
 ## predictions for relative survival (email from Anke Richters)
 set.seed(12345)
 d <- with(list(t0=rexp(10000), # constant hazard
@@ -52,6 +71,10 @@ S1 <- predict(fit,newdata=data.frame(x=1),grid=TRUE,full=TRUE)
 lines(S0$t,S1$Estimate-S0$Estimate,col="blue")
 abline(h=0)
 abline(v=1)
+
+library(rstpm2)
+fit1 <- coxph(Surv(rectime,censrec==1)~ns(x1,df=2),data=brcancer)
+
 
 ## Missing values in predictions
 library(rstpm2)
