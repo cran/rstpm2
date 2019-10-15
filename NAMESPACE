@@ -2,9 +2,16 @@ useDynLib(rstpm2, .registration=TRUE)
 
 exportClasses(stpm2,pstpm2,tvcCoxph,aft)
 
-export(stpm2,pstpm2,incrVar,nsx,predictnl,"coef<-",cox.tvc,aft,nsxD,
-       eform, predictnl, coef, confint)
-export(predictnl.default, confint.predictnl, vuniroot)
+export(stpm2, pstpm2, aft, gsm,
+       cox.tvc, # experimental --- don't export?
+       markov_msm, ratio_markov_msm,
+       zeroModel, hrModel, aftModel, addModel, # stratifiedModel,
+       hazFun, splineFun,
+       standardise,
+       incrVar, nsx, nsxD, "coef<-",
+       eform, predictnl, coef, confint, 
+       predictnl.default, confint.predictnl,
+       vuniroot)
 
 S3method(makepredictcall, nsx)
 S3method(makepredictcall, nsxD)
@@ -15,6 +22,7 @@ S3method(predictnl, default)
 S3method(predictnl, lm)
 S3method(print, predictnl)
 S3method(confint, predictnl)
+
 S3method(lines, stpm2)
 S3method(lines, pstpm2)
 S3method(eform, stpm2)
@@ -23,19 +31,44 @@ S3method(vcov, stpm2)
 S3method(coef, pstpm2)
 S3method(vcov, pstpm2)
 
+S3method(as.data.frame, markov_msm)
+S3method(as.data.frame, markov_msm_diff)
+S3method(as.data.frame, markov_msm_ratio)
+S3method(vcov, markov_msm)
+S3method(standardise, markov_msm)
+S3method(print, markov_msm)
+S3method(plot, markov_msm)
+S3method(subset, markov_msm)
+S3method(rbind, markov_msm)
+S3method(transform, markov_msm)
+S3method(nrow, markov_msm)
+S3method(diff, markov_msm)
+
+## S3method(predict, zeroModel)
+## S3method(coef, zeroModel)
+## S3method(vcov, zeroModel)
+## S3method(predict, hrModel)
+## S3method(coef, hrModel)
+## S3method(vcov, hrModel)
+## S3method(predict, stratifiedModel)
+## S3method(coef, stratifiedModel)
+## S3method(vcov, stratifiedModel)
+
+
 ## All methods for imported generics:
 exportMethods(plot,predict,predictnl,coef,confint,summary,update,anova,vcov,formula,
               BIC,AIC,AICc,qAICc,simulate,residuals,lines,eform)
 
-importFrom(graphics,plot,lines,matplot,par,polygon,abline,matlines)
-## importFrom(splines,bs,ns,spline.des,splineDesign)
+importFrom(graphics,plot,lines,matplot,par,polygon,abline,matlines,box)
 importFrom(stats, quantile, lm, as.formula, coef, makepredictcall, na.fail, predict,
            contrasts,delete.response, get_all_vars, model.extract, model.frame, 
            model.matrix, model.weights, na.pass, optimHess, pweibull, 
            terms, terms.formula, .checkMFClasses, .getXlevels, pchisq, printCoefmat,
-           anova, var, residuals, confint, qnorm, complete.cases)
+           anova, var, residuals, confint, qnorm, complete.cases, reformulate)
 importFrom(mgcv,gam,s)
 importFrom(Rcpp,sourceCpp)
+importFrom(deSolve,ode)
 import(bbmle,methods,survival,splines)
+
 
 

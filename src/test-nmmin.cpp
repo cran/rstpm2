@@ -553,7 +553,7 @@ namespace rstpm2 {
   // struct for data
   struct BaseData {
     mat X, XD, X0, X1; 
-    vec bhazard,wt,wt0,event,time;
+    vec bhazard,wt,wt0,event,time,offset;
     vec map0;
     uvec ind0, which0;
   };
@@ -585,6 +585,7 @@ namespace rstpm2 {
       wt = as<vec>(list["wt"]);
       event = as<vec>(list["event"]);
       time = as<vec>(list["time"]);
+      offset = as<vec>(list["offset"]);
       delayed = as<bool>(list["delayed"]);
       interval = as<bool>(list["interval"]);
       n = nbeta = init.size(); // number of parameters
@@ -676,12 +677,12 @@ namespace rstpm2 {
     }
     li_constraint li(vec eta, vec etaD, vec eta0, vec eta1) {
       if (interval) {
-	return li_interval(eta, etaD, eta1);
+	return li_interval(eta+offset, etaD, eta1+offset);
       }
       else {
-	li_constraint s = li_right_censored(eta, etaD);
+	li_constraint s = li_right_censored(eta+offset, etaD);
 	if (delayed && !eta0.empty()) {
-	  li_constraint s0 = li_left_truncated(eta0);
+	  li_constraint s0 = li_left_truncated(eta0+offset(which0));
 	  s.constraint += s0.constraint;
 	  if (bfgs.trace > 0) {
 	    Rprint(which0);
@@ -1302,7 +1303,7 @@ namespace rstpm2 {
       vec vbeta(beta); // logtheta is the last parameter in beta
       vbeta.resize(this->nbeta);
       double theta = exp(beta[n-1]);
-      eta = this->X * vbeta;
+      eta = this->X * vbeta + this->offset;
       etaD = this->XD * vbeta;
       vec h = this->link->h(eta,etaD) + this->bhazard;
       vec H = this->link->H(eta);
@@ -1312,7 +1313,7 @@ namespace rstpm2 {
       H = max(H,eps);
       vec H0;
       if (this->delayed) {
-	eta0 = this->X0 * vbeta;
+	eta0 = this->X0 * vbeta + this->offset(this->which0);
 	H0 = this->link->H(eta0);
 	constraint += this->kappa/2.0 * sum(H0 % H0 % (H0<0));
       }
@@ -1480,6 +1481,7 @@ namespace rstpm2 {
       List list = as<List>(sexp);
       const BaseData fullTmp = {this->X, this->XD, this->X0, this->X1, this->bhazard,
 				this->wt, this->wt0, this->event, this->time,
+				this->offset,
 				this->map0, this->ind0, this->which0};
       full = fullTmp;
       IntegerVector cluster = as<IntegerVector>(list["cluster"]);
@@ -1636,6 +1638,7 @@ namespace rstpm2 {
       this->wt = full.wt;
       this->event = full.event;
       this->time = full.time;
+      this->offset = full.offset;
       this->X1 = full.X1;
       this->X0 = full.X0;
       this->wt0 = full.wt0;
@@ -1653,6 +1656,7 @@ namespace rstpm2 {
       this->wt = full.wt(index);
       this->event = full.event(index);
       this->time = full.time(index);
+      this->offset = full.offset(index);
       this->Z = full_Z(index);
       this->Z0 = vec(1,fill::zeros);
       if (this->delayed) {
@@ -1884,6 +1888,7 @@ namespace rstpm2 {
       List list = as<List>(sexp);
       const BaseData fullTmp = {this->X, this->XD, this->X0, this->X1, this->bhazard,
 				this->wt, this->wt0, this->event, this->time,
+				this->offset,
 				this->map0, this->ind0, this->which0};
       full = fullTmp;
       IntegerVector cluster = as<IntegerVector>(list["cluster"]);
@@ -2011,14 +2016,14 @@ namespace rstpm2 {
     // gradient in SqrtSigma wrt beta
     cube gradSqrtSigma(vec beta, double eps = 1.0e-6) {
       cube out(redim,redim,reparm,fill::zeros);
-      int offset = beta.size()-reparm;
+      int offseti = beta.size()-reparm;
       vec betax;
       mat val;
       for (int i=0; i<reparm; ++i) {
 	betax = beta;
-	betax(offset+i) += eps;
+	betax(offseti+i) += eps;
 	val = calc_SqrtSigma(betax, false);
-	betax(offset+i) -= 2.0*eps;
+	betax(offseti+i) -= 2.0*eps;
 	out.slice(i) = (val - calc_SqrtSigma(betax, false))/2.0/eps;
       }
       return out;
@@ -2259,6 +2264,7 @@ namespace rstpm2 {
       this->wt = full.wt;
       this->event = full.event;
       this->time = full.time;
+      this->offset = full.offset;
       this->X1 = full.X1;
       this->X0 = full.X0;
       this->wt0 = full.wt0;
@@ -2275,6 +2281,7 @@ namespace rstpm2 {
       this->bhazard = full.bhazard(index);
       this->wt = full.wt(index);
       this->event = full.event(index);
+      this->offset = full.offset(index);
       this->time = full.time(index);
       this->Z = full_Z.rows(index);
       this->Z0 = mat(1,redim,fill::zeros);

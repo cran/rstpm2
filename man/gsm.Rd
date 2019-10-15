@@ -1,73 +1,106 @@
-\name{pstpm2}
-\Rdversion{1.1}
+\name{gsm}
+\alias{gsm}
 \alias{pstpm2}
-%- Also NEED an '\alias' for EACH other topic documented here.
+\alias{stpm2}
 \title{
-Penalised generalised survival model
+  Parametric and penalised generalised survival models
 }
 \description{
   This implements the generalised survival model g(S(t|x)) = eta, where
-g is a link function, S is survival, t is time, x are covariates and eta
-is a linear predictor. The linear predictor can include penalised
-smoothers for the time effects, for time:covariate interactions and for
-covariate effects using the mgcv smoothers. The main model assumption is that the time
-effects in the linear predictor are smooth. This extends the class of
-flexible parametric survival models developed by Royston and
-colleagues. The model has been extended to include relative survival,
-Gamma frailties and normal random effects.
+  g is a link function, S is survival, t is time, x are covariates and eta
+  is a linear predictor. The linear predictor can include either
+  parametric or penalised
+  smoothers for the time effects, for time:covariate interactions and for
+  covariate effects. The main model assumption is that the time
+  effects in the linear predictor are smooth. This extends the class of
+  flexible parametric survival models developed by Royston and
+  colleagues. The model has been extended to include relative survival
+  (excess hazards),
+  Gamma frailties and normal random effects.
 }
 \usage{
-pstpm2(formula, data, smooth.formula = NULL, smooth.args = NULL,
-       logH.args = NULL, 
-       tvc = NULL, 
-       control = list(), init = NULL,
-       coxph.strata = NULL, coxph.formula = NULL,
-       weights = NULL, robust = FALSE, 
-       bhazard = NULL, bhazinit = NULL, timeVar = "", time0Var = "",
-       sp=NULL, use.gr = NULL, 
-       criterion=c("GCV","BIC"), penalty = NULL,
-       smoother.parameters = NULL,
-       alpha=if (is.null(sp)) switch(criterion,GCV=1,BIC=1) else 1,
-       sp.init=1, trace = NULL,
-       link.type=c("PH","PO","probit","AH","AO"), theta.AO=0,
-       optimiser = NULL, log.time.transform=TRUE,
-       recurrent = FALSE, frailty=!is.null(cluster) & !robust,cluster = NULL,
-       logtheta=NULL, nodes=NULL,
-       RandDist=c("Gamma","LogN"), adaptive = NULL, maxkappa=NULL, Z = ~1, 
-       reltol = NULL, outer_optim=NULL,
-       contrasts = NULL, subset = NULL, robust_initial = NULL, ...)
+gsm(formula, data, smooth.formula = NULL, smooth.args = NULL,
+                df = 3, cure = FALSE,
+                tvc = NULL, tvc.formula = NULL,
+                control = list(), init = NULL,
+                weights = NULL, robust = FALSE, baseoff = FALSE,
+                timeVar = "", time0Var = "", use.gr = NULL,
+                optimiser=NULL, log.time.transform=TRUE,
+                reltol=NULL, trace = NULL,
+                link.type=c("PH","PO","probit","AH","AO"), theta.AO=0,
+                contrasts = NULL, subset = NULL,
+                robust_initial=NULL,
+                coxph.strata = NULL, coxph.formula = NULL,
+                logH.formula = NULL, logH.args = NULL,
+                bhazard = NULL, bhazinit=NULL,
+                frailty = !is.null(cluster) & !robust, cluster = NULL, logtheta=NULL,
+                nodes=NULL, RandDist=c("Gamma","LogN"), recurrent = FALSE,
+                adaptive = NULL, maxkappa = NULL,
+                sp=NULL, criterion=NULL, penalty=NULL,
+                smoother.parameters=NULL, Z=~1, outer_optim=NULL,
+                alpha=1, sp.init=1,
+                penalised=FALSE,
+                \dots)
+stpm2(formula, data, weights=NULL, subset=NULL, coxph.strata=NULL, \dots)
+pstpm2(formula, data, weights=NULL, subset=NULL, coxph.strata=NULL, \dots)
 }
 %- maybe also 'usage' for other objects documented here.
 \arguments{
   \item{formula}{
 a formula object, with the response on the left of a \code{~} operator, and
 the parametric terms on the right.  The response must be a survival object as
-returned by the \code{\link{Surv}} function. [required]
+returned by the \code{\link{Surv}} function. Specials include
+\code{cluster} and \code{bhazard}. [required]
 }
   \item{data}{
 a data.frame in which to interpret the variables named in
 the \code{formula} argument.
 }
   \item{smooth.formula}{
-a \code{mgcv::gam} formula for describing the time effects and
-time-dependent effects and smoothed covariate effects on the linear
-predictor scale
-(default=NULL). The default model is equal to \code{~s(log(time),k=-1)}
-where \code{time} is the time variable.
+    either a parametric formula or a penalised \code{mgcv::gam} formula for
+    describing the time effects and
+    time-dependent effects and smoothed covariate effects on the linear
+    predictor scale
+    (default=NULL). The default model is equal to \code{~s(log(time),k=-1)}
+    where \code{time} is the time variable.
+}
+  \item{df}{
+an integer that describes the degrees of freedom for the \code{ns}
+function for modelling the baseline log-cumulative hazard
+(default=3). Parametric model only.
 }
   \item{smooth.args}{
 a list describing the arguments for the \code{s} function for modelling
 the baseline time effect on the linear predictor scale (default=NULL). 
 }
+  \item{tvc}{
+a list with the names of the time-varying coefficients. For a parametric
+model, this uses natural splines (e.g. \code{tvc=list(hormon=3)} is equivalent
+to
+\code{smooth.formula=~...+hormon:nsx(log(time),df=3)}), which by default
+does \emph{not} include an intercept (or main effect) term. For a penalised
+model, this uses cubic splines
+(e.g. \code{tvc=list(hormon=-1)} is equivalent to
+\code{smooth.formula=~...+s(log(time),by=hormon,k=-1))}, which by
+default \emph{does} include an intercept (or main effect) term (and this
+code will remove any main effect from \code{formula}). 
+}
+  \item{tvc.formula}{
+separate formula for the time-varying effects. This is combined with
+\code{smooth.formula} or the default \code{smooth.formula}.
+}
+\item{baseoff}{Boolean used to determine whether fully define the model
+using \code{tvc.formula} rather than combining \code{logH.formula} and \code{tvc.formula}}
   \item{logH.args}{
 as per \code{smooth.args}. Deprecated.
 }
-  \item{tvc}{
-a list with the names of the time-varying coefficients
-(e.g. tvc=list(hormon), which is equivalent to smooth.formula=~...+s(log(time),by=hormon)).
-}
-\item{control}{list of arguments passed to \code{pstpm2.control}.}
-\item{init}{\code{init} should either be \code{FALSE}, such that initial
+  \item{logH.formula}{
+    as per \code{smooth.formula}. Deprecated.
+  }
+\item{cure}{logical for whether to estimate a cure model (parametric
+  model only).}
+\item{control}{list of arguments passed to \code{gsm.control}.}
+\item{init}{\code{init} should either be \code{NULL}, such that initial
                   values will be determined using Cox regression, or a numeric
                   vector of initial values.}
 \item{coxph.strata}{variable in the \code{data} argument for
@@ -124,8 +157,9 @@ hazards), g(S)=-log(S); for "AO" (generalised Aranda-Ordaz), g(S)=log((S^(-theta
   recurrent or for first event (where the latter requires an adjustment
   for the frailties or random effects)}
 \item{frailty}{logical for whether to fit a shared frailty model}
-\item{cluster}{string for the data variable that determines the cluster
-  for the frailty}
+\item{cluster}{variable that determines the cluster
+  for the frailty. This can be a vector, a string for the column, or a
+  name. This can also be specified using a special.}
 \item{logtheta}{initial value for log-theta used in the gamma shared frailty
   model (defaults to value from a \code{coxph} model fit)}
 \item{nodes}{number of integration points for Gaussian
@@ -149,20 +183,23 @@ hazards), g(S)=-log(S); for "AO" (generalised Aranda-Ordaz), g(S)=log((S^(-theta
 \item{robust_initial}{logical for whether to use Nelder-Mead
   to find initial values (max 50 iterations). This is useful for
   ill-posed initial values. Default= FALSE. Deprecated argument: use of the
-\code{control} argument is preferred.}  
-\item{\dots}{
-  additional arguments to be passed to the \code{\link{mle2}} .
-}
+  \code{control} argument is preferred.}
+\item{penalised}{logical to show whether to use penalised models with
+  \code{pstpm} (\code{penalised=TRUE}) or parametrics models with
+  \code{stpm2} (\code{penalised=FALSE}).}
+\item{\dots}{ additional arguments to be passed to the \code{\link{mle2}}.}
 }
 \details{
   
   The implementation extends the \code{mle2} object from the
   \code{bbmle} package.
 
-  The default smoother for time on the linear predictor scale is s(log(time)).
+  The default smoothers for time on the linear predictor scale are
+  \code{nsxs(log(time),df=3)} for the parametric model and
+  \code{s(log(time))} for the penalised model.
 }
 \value{
-A \code{pstpm2-class} object. 
+Either a \code{stpm2-class} or \code{pstpm2-class} object. 
   %%  ~Describe the value returned
 %%  If it is a LIST, use
 %%  \item{comp1 }{Description of 'comp1'}
@@ -186,75 +223,49 @@ A \code{pstpm2-class} object.
 %% }
 \examples{
 \dontrun{
-data(brcancer)
-## standard Kaplan-Meier curves by hormon
-plot(survfit(Surv(rectime/365,censrec==1)~1,data=brcancer,subset=hormon==1),
-  xlab="Recurrence free survival time (years)",
-  ylab="Survival")
-lines(survfit(Surv(rectime/365,censrec==1)~1,data=brcancer,subset=hormon==0),col=2,
-  conf.int=TRUE)
-legend("topright", legend=c("Hormonal therapy","No hormonal therapy"),lty=1,col=1:2,bty="n")
-
-## now fit a penalised stpm2 model
-fit <- pstpm2(Surv(rectime/365,censrec==1)~hormon,data=brcancer)
-## no S4 generic lines() method: instead, use plot(..., add=TRUE)
-plot(fit,newdata=data.frame(hormon=1),type="surv",add=TRUE,ci=FALSE,line.col="blue",lwd=2,
-  rug=FALSE)
-plot(fit,newdata=data.frame(hormon=0),type="surv",add=TRUE,ci=FALSE,line.col="green",lwd=2,
-  rug=FALSE)
-
-## plot showing proportional hazards
-plot(fit,newdata=data.frame(hormon=1),type="hazard",line.col="blue",lwd=2,
-  rug=FALSE,ylim=c(0,1e-3))
-plot(fit,newdata=data.frame(hormon=0),type="hazard",add=TRUE,ci=FALSE,line.col="green",lwd=2,
-  rug=FALSE)
-
-## time-varying hazard ratios
-fit.tvc <- pstpm2(Surv(rectime,censrec==1)~1,
-  data=brcancer,
-  smooth.formula=~s(log(rectime))+s(log(rectime),by=hormon))
-plot(fit.tvc,newdata=data.frame(hormon=1),type="hazard",line.col="blue",lwd=2,
-  rug=FALSE)
-plot(fit.tvc,newdata=data.frame(hormon=0),type="hazard",line.col="red",lwd=2,
-  add=TRUE)
-
-## Smooth covariate effects
-fit.smoothx <- pstpm2(Surv(rectime,censrec==1)~1,
-  data=brcancer,
-  smooth.formula=~s(log(rectime))+s(x1))
-ages <- seq(21,80,length=301)
-haz <- predict(fit.smoothx,newdata=data.frame(hormon=1,rectime=365,x1=ages),
-               type="hazard",se.fit=TRUE)
-matplot(ages,haz/haz[150,1],type="l",log="y",ylab="Hazard ratio")
-
-## compare with df=5 from stpm2
-fit.stpm2 <- stpm2(Surv(rectime/365,censrec==1)~hormon,data=brcancer,df=7)
-plot(fit,newdata=data.frame(hormon=1),type="hazard",line.col="blue",lwd=2,
-  rug=FALSE,ylim=c(0,1e-3))
-plot(fit.stpm2,newdata=data.frame(hormon=1),type="hazard",line.col="orange",lwd=2,
-  rug=FALSE,add=TRUE,ci=FALSE)
-
-## time-varying coefficient
-##summary(fit.tvc <- pstpm2(Surv(rectime,censrec==1)~hormon,data=brcancer,
-##                     tvc=list(hormon=3)))
-##anova(fit,fit.tvc) # compare with and without tvc (unclear whether this is valid)
-
-## some more plots
-## plot(fit.tvc,newdata=data.frame(hormon=0),type="hr",var="hormon")
+    data(brcancer)
+    summary(fit <- stpm2(Surv(rectime,censrec==1)~hormon,data=brcancer,df=3))
+    
+    ## some predictions
+    head(predict(fit,se.fit=TRUE,type="surv"))
+    head(predict(fit,se.fit=TRUE,type="hazard"))
+    
+    ## some plots
+    plot(fit,newdata=data.frame(hormon=0),type="hazard")
+    plot(fit,newdata=data.frame(hormon=0),type="surv")
+    
+    ## the same model using logH.formula
+    summary(stpm2(Surv(rectime,censrec==1)~hormon,
+                  data=brcancer,logH.formula=~ns(log(rectime),df=3)))
+    
+    
+    ## time-varying coefficient
+    summary(fit.tvc <- stpm2(Surv(rectime,censrec==1)~hormon,data=brcancer,df=3,
+                             tvc=list(hormon=3)))
+    anova(fit,fit.tvc) # compare with and without tvc
+    
+    ## some more plots
+    plot(fit.tvc,newdata=data.frame(hormon=0),type="hr",var="hormon", ylim=c(0,2))
                                         # no lines method: use add=TRUE
-## plot(fit.tvc,newdata=data.frame(hormon=1),type="hr",var="hormon",
-##     add=TRUE,ci=FALSE,line.col=2)
+    plot(fit.tvc,newdata=data.frame(hormon=1),type="hr",var="hormon",
+     add=TRUE,ci=FALSE,line.col=2)
 
-## plot(fit.tvc,newdata=data.frame(hormon=0),type="sdiff",var="hormon")
-
-## plot(fit.tvc,newdata=data.frame(hormon=0),type="hdiff",var="hormon")
-
-## plot(fit.tvc,newdata=data.frame(hormon=0),type="hazard")
-## plot(fit.tvc,newdata=data.frame(hormon=1),type="hazard",line.col=2,ci=FALSE,add=TRUE)
-
+    plot(fit.tvc,newdata=data.frame(hormon=0),type="sdiff",var="hormon")
+    
+    plot(fit.tvc,newdata=data.frame(hormon=0),type="hdiff",var="hormon")
+    
+    plot(fit.tvc,newdata=data.frame(hormon=0),type="hazard")
+    plot(fit.tvc,newdata=data.frame(hormon=1),type="hazard",line.col=2,ci=FALSE,add=TRUE)
+    
+    ## compare number of knots
+    hormon0 <- data.frame(hormon=0)
+    plot(fit,type="hazard",newdata=hormon0)
+    AIC(fit)
+    for (df in 4:6) {
+        fit.new <- stpm2(Surv(rectime,censrec==1)~hormon,data=brcancer,df=df)
+        plot(fit.new,type="hazard",newdata=hormon0,add=TRUE,ci=FALSE,line.col=df)
+        print(AIC(fit.new))
+    }
+    }
 }
-}
-% Add one or more standard keywords, see file 'KEYWORDS' in the
-% R documentation directory.
-%%\keyword{ ~kwd1 }
-%%\keyword{ ~kwd2 }% __ONLY ONE__ keyword per line
+\keyword{ survival }

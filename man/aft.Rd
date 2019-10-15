@@ -12,7 +12,7 @@ predictor using natural splines.
 }
 \usage{
 aft(formula, data, smooth.formula = NULL, df = 3,
-    control = list(parscale = 1, maxit = 1000),
+    tvc = NULL, control = list(parscale = 1, maxit = 1000),
     init = NULL, weights = NULL, timeVar = "", time0Var = "",
     log.time.transform = TRUE,
     reltol = 1e-08, trace = 0, contrasts = NULL, subset = NULL,
@@ -40,6 +40,12 @@ modelled with any smooth functions.
   \item{df}{
 an integer that describes the degrees of freedom for the \code{ns}
 function for modelling the baseline log-cumulative hazards function (default=3).
+}
+  \item{tvc}{
+a list with the names of the time-varying coefficients. This uses natural splines
+(e.g. \code{tvc=list(hormon=3)} is equivalent to
+\code{smooth.formula=~...+hormon:nsx(log(time),df=3)}), which by default
+does \emph{not} include an intercept (or main effect) term. 
 }
   \item{control}{
 \code{control} argument passed to \code{optim}.
