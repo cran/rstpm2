@@ -12,8 +12,8 @@ Authors@R: c(person("Mark", "Clements", role = c("aut", "cre"),
 	      person("Patrick","Alken", role="cph"),
 	      person("Simon","Wood", role="cph"),
 	      person("Rhys","Ulerich", role="cph"))
-Version: 1.5.0
-Date: 2019-10-09
+Version: 1.5.1
+Date: 2019-10-28
 Depends: R (>= 3.0.2), methods, survival, splines
 Imports: graphics, Rcpp (>= 0.10.2), stats, mgcv, bbmle (>= 1.0.20),
         fastGHQuad, deSolve, utils, parallel
@@ -26,7 +26,7 @@ BugReports: http://github.com/mclements/rstpm2/issues
 License: GPL-2 | GPL-3
 LazyData: yes
 NeedsCompilation: yes
-Packaged: 2019-10-15 12:04:47 UTC; marcle
+Packaged: 2019-11-05 07:48:56 UTC; marcle
 Author: Mark Clements [aut, cre],
   Xing-Rong Liu [aut],
   Paul Lambert [ctb],
@@ -37,4 +37,4 @@ Author: Mark Clements [aut, cre],
   Simon Wood [cph],
   Rhys Ulerich [cph]
 Repository: CRAN
-Date/Publication: 2019-10-15 15:10:02 UTC
+Date/Publication: 2019-11-05 23:00:05 UTC

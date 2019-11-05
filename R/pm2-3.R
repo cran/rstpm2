@@ -251,7 +251,10 @@ numDeltaMethod <- function(object, fun, gd=NULL, ...) {
   if (!is.null(names(fit)))
       names(se.fit) <- names(fit)
   if(all(se.fit==0)) warning("Zero variance estimated. Do you need to pass a newdata argument to fun()?")
-  structure(data.frame(fit = fit, se.fit = se.fit, Estimate = fit, SE = se.fit), # vcov=Sigma,
+  df <- data.frame(fit = as.numeric(fit), se.fit = as.numeric(se.fit),
+                   Estimate = as.numeric(fit), SE = as.numeric(se.fit))
+  row.names(df) <- names(fit)
+  structure(df, # vcov=Sigma,
             class=c("predictnl","data.frame"))
 }
 "coef<-" <- function (x, value) 
@@ -1496,7 +1499,8 @@ gsm <- function(formula, data, smooth.formula = NULL, smooth.args = NULL,
                    link=link,
                    args=args)
         if (robust && !frailty) # kludge
-            out@vcov <- sandwich.stpm2(out, cluster=cluster)
+          out@vcov <- sandwich.stpm2(out, cluster=cluster)
+        attr(out,"nobs") <- nrow(out@x) # for logLik method
     }
     return(out)
 }
@@ -1669,6 +1673,7 @@ predict.stpm2.base <-
                            loghazard = "I", link = "I", odds = "log", or = "log",
                            margsurv = "log", marghaz = "I", marghr = "I",
                            meansurv = "I", meanhr = "I", meanhaz = "I", af = "I",
+                           meansurvdiff = "I",
                            fail = "cloglog", uncured = "log", density = "log",
                            rmst = "I", probcure = "cloglog", lpmatrix="I", gradh="I",
                            gradH="I")
@@ -1678,6 +1683,7 @@ predict.stpm2.base <-
                            loghazard = "I", link = "I", odds = "log", or = "log",
                            margsurv = "cloglog", marghaz = "log", marghr = "log",
                            meansurv = "I", meanhr="log", meanhaz = "I", af = "I",
+                           meansurvdiff = "I",
                            fail = "cloglog", uncured = "cloglog", density = "log",
                            rmst = "I", probcure = "cloglog", lpmatrix="I", gradh="I",
                            gradH="I")
@@ -2252,8 +2258,11 @@ predict.stpm2.base <-
     }
     if (keep.attributes)
         attr(out,"newdata") <- newdata
-    if (full) 
-        out <- if(is.data.frame(out)) cbind(newdata,out) else cbind(newdata, data.frame(Estimate=out))
+    if (full) {
+      if (type %in% c("hr","sdiff","hdiff","meansurvdiff","meanhr","or","marghr","af","uncured","probcure"))
+        newdata <- exposed(newdata)
+      out <- if(is.data.frame(out)) cbind(newdata,out) else cbind(newdata, data.frame(Estimate=out))
+    }
     return(out)
 }
 
@@ -2323,8 +2332,14 @@ plot.meansurv <- function(x, y=NULL, times=NULL, newdata=NULL, type="meansurv", 
                                       newd
                                   }))
         pred <- predict(x, newdata=newdata, type=type, keep.attributes=TRUE, se.fit=ci, exposed=exposed, var=var) # requires recent version
-        if (type=="meansurv")
-            pred <- if (ci) rbind(c(Estimate=1,lower=1,upper=1),pred) else c(1,pred)
+        if (type=="meansurv") {
+          pred <- if (ci) rbind(c(Estimate=1,lower=1,upper=1),pred) else c(1,pred)
+          times <- c(0,times)
+        }
+        if (type=="meansurvdiff") {
+          pred <- if (ci) rbind(c(Estimate=0,lower=0,upper=0),pred) else c(0,pred)
+          times <- c(0,times)
+        }
     } else {
         pred <- lapply(times, 
                        function(time) {
@@ -2334,6 +2349,10 @@ plot.meansurv <- function(x, y=NULL, times=NULL, newdata=NULL, type="meansurv", 
         pred <- do.call("rbind", pred)
         if (type=="meansurv")  {
             pred <- if (ci) rbind(c(Estimate=1,lower=1,upper=1),pred) else c(1,unlist(pred))
+            times <- c(0,times)
+            }
+        if (type=="meansurvdiff")  {
+            pred <- if (ci) rbind(c(Estimate=0,lower=0,upper=0),pred) else c(0,unlist(pred))
             times <- c(0,times)
             }
         }
@@ -2368,7 +2387,7 @@ plot.stpm2.base <-
                    type.relsurv=c("excess","total","other"), ratetable = survival::survexp.us, rmap, scale=365.24, ...) {
               if (type %in% c("meansurv","meansurvdiff","af","meanhaz","meanhr")) {
                   return(plot.meansurv(x,times=times,newdata=newdata,type=type,xlab=xlab,ylab=ylab,line.col=line.col,ci.col=ci.col,
-                                       lty=lty,add=add,ci=ci,rug=rug, exposed=exposed, ...))
+                                       lty=lty,add=add,ci=ci,rug=rug, exposed=exposed, var=var, ...))
               }
               if (is.null(newdata)) stop("newdata argument needs to be specified")
               y <- predict(x,newdata,type=switch(type,fail="surv",margfail="margsurv",type),var=var,exposed=exposed,
