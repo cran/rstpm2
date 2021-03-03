@@ -36,6 +36,65 @@ test_that("Cure", {
     fit <- stpm2(Surv(rectime,censrec==1)~hormon,data=brcancer,cure=TRUE)
     expect_eps(coef(fit)[2], -0.3564268, 1e-5)
 })
+test_that("probit", {
+    fit <- stpm2(Surv(rectime,censrec==1)~hormon,data=brcancer,link="probit")
+    expect_eps(coef(fit)[2], -0.282318, 1e-5)
+})
+
+
+test_that("interval", {
+    ## ICPHREG example
+    read.textConnection <- function(text, ...) {
+        conn <-  textConnection(text)
+        on.exit(close(conn))
+        read.table(conn, ...)
+    }
+    hiv <- read.textConnection("0 16 0 0 0 1
+15 26 0 0 0 1
+12 26 0 0 0 1
+17 26 0 0 0 1
+13 26 0 0 0 1
+0 24 0 0 1 0
+6 26 0 1 1 0
+0 15 0 1 1 0
+14 26 0 1 1 0
+12 26 0 1 1 0
+13 26 0 1 0 1
+12 26 0 1 1 0
+12 26 0 1 1 0
+0 18 0 1 0 1
+0 14 0 1 0 1
+0 17 0 1 1 0
+0 15 0 1 1 0
+3 26 1 0 0 1
+4 26 1 0 0 1
+1 11 1 0 0 1
+13 19 1 0 0 1
+0 6 1 0 0 1
+0 11 1 1 0 0
+6 26 1 1 0 0
+0 6 1 1 0 0
+2 12 1 1 0 0
+1 17 1 1 1 0
+0 14 1 1 0 0
+0 25 1 1 0 1
+2 11 1 1 0 0
+0 14 1 1 0 0")
+    names(hiv) <- c("Left","Right","Stage","Dose","CdLow","CdHigh")
+    hiv <- transform(hiv,Event = ifelse(Left==0,2,
+                                 ifelse(Right>=26,0,
+                                        3)))
+    hiv2 <- transform(hiv,
+                      Left = ifelse(Event==2,Right,
+                             ifelse(Event==0,Left,
+                                    Left)),
+                      Right = ifelse(Event==2,Inf,
+                              ifelse(Event==0,Inf,
+                                     Right)))
+    fit <- stpm2(Surv(Left,Right,Event,type="interval")~Stage, data=hiv2, df=2)
+    expect_eps(coef(fit)[2], 1.917699, 1e-4)
+})
+
 
 context("stpm2 + frailty")
 ##
@@ -52,6 +111,19 @@ test_that("base", {
     fit <- stpm2(Surv(y,e)~x+cluster(id),data=d,RandDist="LogN")
     expect_eps(coef(fit)[2], 0.93819784, 1e-5)
     expect_eps(coef(fit)[6], 0.02906888, 1e-5)
+})
+##
+test_that("providing initial values with frailty works", {
+  dat <- data.frame(
+    y     = c(1, 2, 1, 2, 1, 1), 
+    event = c(0, 1, 1, 0, 1, 1),
+    grp   = c(1, 1, 2, 2, 3, 3))
+  
+  fit     <- gsm(Surv(y, event) ~ 1, dat, df = 1, cluster = dat$grp)
+  fit_new <- gsm(Surv(y, event) ~ 1, dat, df = 1, cluster = dat$grp, 
+                 init = head(coef(fit), -1), logtheta = tail(coef(fit), 1))
+  
+  expect_equal(coef(fit), coef(fit_new))
 })
 
 context("pstpm2")

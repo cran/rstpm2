@@ -47,6 +47,7 @@ markov_msm(x, trans, t = c(0,1), newdata = NULL, init=NULL,
               state.costs.sd=rep(0,nrow(trans)),
               discount.rate = 0,
               block.size=500,
+              spline.interpolation=FALSE,
               debug=FALSE,
               \dots)
 \method{vcov}{markov_msm}(object, \dots)
@@ -56,6 +57,7 @@ markov_msm(x, trans, t = c(0,1), newdata = NULL, init=NULL,
 				   C.conf.type="log",
                                    P.range=c(0,1), L.range=c(0,Inf),
 				   C.range=c(0,Inf),
+                                   state.weights=NULL, obs.weights=NULL,
                                    \dots)
 \method{as.data.frame}{markov_msm_diff}(x, row.names=NULL, optional=FALSE,
                                    P.conf.type="plain", L.conf.type="plain",
@@ -187,6 +189,10 @@ and costs
   \item{block.size}{
   divide \code{newdata} into blocks. Uses less memory but is slower. Reduce this number if the function call runs out of memory. 
 }
+  \item{spline.interpolation}{
+  logical for whether to use spline interpolation for the transition
+  hazards rather than the model predictions directly (default=TRUE).
+}
   \item{debug}{
   logical flag for whether to keep the full output from the ordinary differential equation in the \code{res} component (default=\code{FALSE}). 
 }
@@ -216,6 +222,8 @@ calculation for the length of stay calculation. Default: log transformation. Thi
 \code{\link{diff}} and \code{\link{ratio_markov_msm}} objects}
 \item{C.range}{valid values for the state occupancy probabilities. Default: (0,Inf). This is changed for
 \code{\link{diff}} and \code{\link{ratio_markov_msm}} objects}
+\item{state.weights}{Not currently documented}
+\item{obs.weights}{Not currently documented}
 
 For \code{standardise.markov_msm}:
 
@@ -345,10 +353,48 @@ Mark Clements
 }
 \examples{
 \dontrun{
-## Crowther and Lambert (2019)
 library(readstata13)
 library(mstate)
 library(ggplot2)
+library(survival)
+## Two states: Initial -> Final
+## Note: this shows how to use markov_msm to estimate survival and risk probabilities based on
+## smooth hazard models.
+two_states <- function(model, ...) {
+    transmat = matrix(c(NA,1,NA,NA),2,2,byrow=TRUE)
+    rownames(transmat) <- colnames(transmat) <- c("Initial","Final")
+    rstpm2::markov_msm(list(model), ..., trans = transmat)
+}
+## Note: the first argument is the hazard model. The other arguments are arguments to the
+## markov_msm function, except for the transition matrix, which is defined by the new function.
+death = gsm(Surv(time,status)~factor(rx), data=survival::colon, subset=(etype==2), df=3)
+cr = two_states(death, newdata=data.frame(rx="Obs"), t = seq(0,2500, length=301))
+plot(cr,ggplot=TRUE)
+
+## Competing risks
+## Note: this shows how to adapt the markov_msm model for competing risks.
+competing_risks <- function(listOfModels, ...) {
+    nRisks = length(listOfModels)
+    transmat = matrix(NA,nRisks+1,nRisks+1)
+    transmat[1,1+(1:nRisks)] = 1:nRisks
+    rownames(transmat) <- colnames(transmat) <- c("Initial",names(listOfModels))
+    rstpm2::markov_msm(listOfModels, ..., trans = transmat)
+}
+## Note: The first argument for competing_risks is a list of models. Names from that list are
+## used for labelling the states. The other arguments are as per the markov_msm function,
+## except for the transition matrix, which is defined by the competing_risks function.
+recurrence = gsm(Surv(time,status)~factor(rx), data=survival::colon, subset=(etype==1), df=3)
+death = gsm(Surv(time,status)~factor(rx), data=survival::colon, subset=(etype==2), df=3)
+cr = competing_risks(list(Recurrence=recurrence,Death=death),
+                     newdata=data.frame(rx=levels(survival::colon$rx)),
+                     t = seq(0,2500, length=301))
+## Plot the probabilities for each state for three different treatment arms
+plot(cr, ggplot=TRUE) + facet_grid(~ rx)
+## And: differences in probabilities
+cr_diff = diff(subset(cr,rx=="Lev+5FU"),subset(cr,rx=="Obs"))
+plot(cr_diff, ggplot=TRUE, stacked=FALSE)
+
+## Extended example: Crowther and Lambert (2019)
 mex.1 <- read.dta13("http://fmwww.bc.edu/repec/bocode/m/multistate_example.dta")
 transmat <- rbind("Post-surgery"=c(NA,1,2), 
                   "Relapsed"=c(NA,NA,3),
@@ -379,7 +425,7 @@ nd <- transform(nd, age=54, pr_1=3, hormon=0,
                 size3=(unclass(size)==3)+0)
 ## Predictions
 system.time(pred1 <- rstpm2::markov_msm(list(c.ar,c.ad,c.rd), t = seq(0,15,length=301),
-                                        newdata=nd, trans = transmat)) # ~15 seconds
+                                        newdata=nd, trans = transmat)) # ~2 seconds
 pred1 <- transform(pred1, Nodes=paste("Nodes =",nodes), Size=paste("Size",size))
 ## Figure 3
 plot(pred1, ggplot=TRUE) + facet_grid(Nodes ~ Size) + xlab("Years since surgery")

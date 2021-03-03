@@ -3,6 +3,14 @@
 #include <map>
 #include "c_optim.h"
 
+#ifdef DO_PROF
+#include <gperftools/profiler.h>
+#include <iostream>
+#include <iomanip>
+#include <ctime>
+#include <sstream>
+#endif
+
 namespace rstpm2 {
 
   // import namespaces
@@ -26,13 +34,13 @@ namespace rstpm2 {
   // constants
   const double log2pi = std::log(2.0 * M_PI); // 
   // Hadamard element-wise multiplication for the _columns_ of a matrix with a vector
-  mat rmult(mat m, vec v) {
+  mat rmult(mat const &m, vec const &v) {
     mat out(m);
     out.each_col() %= v;
     return out;
   }
-  mat lmult(vec v, mat m) {
-    return rmult(m,v);
+  mat lmult(vec const &v, mat const &m) {
+    return rmult(m, v);
   }
   // print utilities
   void Rprint(NumericMatrix const & m) {
@@ -81,22 +89,50 @@ namespace rstpm2 {
     }
   }
   // vectorised functions
-  vec pnorm01(vec const & x) {
+  vec pnorm01(vec const &x) {
     vec out(x.size());
-    for (size_t i=0; i<x.size(); ++i)
-      out(i) = R::pnorm(x(i),0.0,1.0,1,0);
+    double const *xi = x.begin();
+    for(double &o : out)
+      o = R::pnorm5(*xi++, 0, 1, true, false);
     return out;
   }
-  vec qnorm01(vec const & x) {
+  vec pnorm01_log(vec const &x) {
     vec out(x.size());
-    for (size_t i=0; i<x.size(); ++i)
-      out(i) = R::qnorm(x(i),0.0,1.0,1,0);
+    double const *xi = x.begin();
+    for(double &o : out)
+      o = R::pnorm5(*xi++, 0, 1, true, true);
     return out;
   }
-  vec dnorm01(vec const & x) {
+  /* \frac \partial{\partial x} \log \Phi(x) = \frac{\phi(x)}{\Phi(x)} */
+  vec dpnorm01_log(vec const &x) {
     vec out(x.size());
-    for (size_t i=0; i<x.size(); ++i)
-      out(i) = R::dnorm(x(i),0.0,1.0,0);
+    double const *xi = x.begin();
+    for(double &o : out){
+      double const xv = *xi++; 
+      if(xv > -10){
+        double const dv     = R::dnorm4(xv, 0, 1    , 0L), 
+                     pv     = R::pnorm5(xv, 0, 1, 1L, 0L);
+        o = dv / pv;
+      } else {
+        double const log_dv = R::dnorm4(xv, 0, 1    , 1L), 
+                     log_pv = R::pnorm5(xv, 0, 1, 1L, 1L);
+        o = std::exp(log_dv - log_pv);
+      }
+    }
+    return out;
+  }
+  vec qnorm01(vec const &x) {
+    vec out(x.size());
+    double const *xi = x.begin();
+    for(double &o : out)
+      o = R::qnorm5(*xi++, 0, 1, true, false);
+    return out;
+  }
+  vec dnorm01(vec const &x) {
+    vec out(x.size());
+    double const *xi = x.begin();
+    for(double &o : out)
+      o = R::dnorm4(*xi++, 0, 1, false);
     return out;
   }
   // we could use templates for the following...
@@ -123,113 +159,134 @@ namespace rstpm2 {
     }
     return wrap(out);
   }
-  // http://gallery.rcpp.org/articles/dmvnorm_arma/
-  arma::vec dmvnrm_arma(arma::mat x,  
-			arma::rowvec mean,  
-			arma::mat sigma, 
-			bool logd = false) { 
+  // https://github.com/RcppCore/rcpp-gallery/issues/123#issue-553642056
+  arma::vec dmvnrm_arma(arma::mat const &x,  
+                        arma::rowvec const &mean,  
+                        arma::mat const &sigma, 
+                        bool const logd = false) { 
     int n = x.n_rows;
     int xdim = x.n_cols;
     arma::vec out(n);
-    arma::mat rooti = arma::trans(arma::inv(trimatu(arma::chol(sigma))));
-    double rootisum = arma::sum(log(rooti.diag()));
-    double constants = -(static_cast<double>(xdim)/2.0) * log2pi;
+    arma::mat const rooti = arma::inv(trimatu(arma::chol(sigma)));
+    double const rootisum = arma::sum(log(rooti.diag())), 
+                constants = -xdim/2.0 * log2pi, 
+              other_terms = rootisum + constants;
+    
+    arma::rowvec z;
     for (int i=0; i < n; i++) {
-      arma::vec z = rooti * arma::trans( x.row(i) - mean) ;    
-      out(i)      = constants - 0.5 * arma::sum(z%z) + rootisum;     
+      z      = (x.row(i) - mean) * rooti;    
+      out(i) = other_terms - 0.5 * arma::dot(z, z);     
     }  
-    if (logd == false) {
+    
+    if (logd == false)
       out = exp(out);
-    }
     return(out);
   }
-  double dmvnrm_arma(arma::vec x,  
-		     arma::vec mean,  
-		     arma::mat sigma, 
-		     bool logd = false) { 
-    int xdim = x.n_rows;
-    arma::mat rooti = arma::trans(arma::inv(trimatu(arma::chol(sigma))));
-    double rootisum = arma::sum(log(rooti.diag()));
-    double constants = -(static_cast<double>(xdim)/2.0) * log2pi;
-    arma::vec z = rooti * (x - mean) ;    
-    double out = constants - 0.5 * arma::sum(z%z) + rootisum;     
-    if (logd == false) {
+  double dmvnrm_arma(arma::vec const &x,  
+                     arma::vec const &mean,  
+                     arma::mat const &sigma, 
+                     bool const logd = false) { 
+    int xdim = x.n_elem;
+    arma::mat const rooti = arma::inv(trimatu(arma::chol(sigma)));
+    double const rootisum = arma::sum(log(rooti.diag())), 
+                constants = -xdim/2.0 * log2pi, 
+              other_terms = rootisum + constants;
+    
+    auto z = (x - mean).t() * rooti;
+    double out = other_terms - 0.5 * arma::dot(z, z);
+    
+    if (logd == false)
       out = exp(out);
-    }
     return(out);
   }
   
   class Link {
   public:
-    virtual vec link(vec S) = 0;
-    virtual vec ilink(vec x) = 0;
-    virtual vec h(vec eta, vec etaD) = 0;
-    virtual vec H(vec eta) = 0;
-    virtual mat gradH(vec eta, mat X) = 0;
-    virtual mat gradh(vec eta, vec etaD, mat X, mat XD) = 0;
+    virtual vec link(vec const &S) const = 0;
+    virtual vec ilink(vec const &x) const = 0;
+    virtual vec h(vec const &eta, vec const &etaD) const  = 0;
+    virtual vec H(vec const &eta) const = 0;
+    virtual mat gradH(vec const &eta, mat const &X) const = 0;
+    virtual mat gradh(vec const &eta, vec const &etaD, mat const &X, 
+                      mat const &XD) const = 0;
     virtual ~Link() { }
   };
   // Various link objects
-  class LogLogLink : public Link {
+  class LogLogLink final : public Link {
   public:
-    vec link(vec S) { return log(-log(S)); }
-    vec ilink(vec x) { return exp(-exp(x)); }
-    vec h(vec eta, vec etaD) { return etaD % exp(eta); }
-    vec H(vec eta) { return exp(eta); }
-    mat gradH(vec eta, mat X) { return rmult(X,exp(eta)); }
-    mat gradh(vec eta, vec etaD, mat X, mat XD) { 
+    vec link(vec const &S) const  { 
+      return log(-log(S));
+    }
+    vec ilink(vec const &x) const { 
+      return exp(-exp(x)); 
+    }
+    vec h(vec const &eta, vec const &etaD) const { 
+      return etaD % exp(eta); 
+    }
+    vec H(vec const &eta) const { 
+      return exp(eta); 
+    }
+    mat gradH(vec const &eta, mat const &X) const { 
+      return rmult(X,exp(eta)); 
+    }
+    mat gradh(vec const &eta, vec const &etaD, mat const &X, 
+              mat const &XD) const { 
       return rmult(XD, exp(eta)) + rmult(X, etaD % exp(eta));
     }
-    cube hessianH(vec beta, mat X) { 
+    cube hessianH(vec const &beta, mat const &X) const { 
       cube c(beta.size(), beta.size(), X.n_rows);
       for (size_t i=0; i<X.n_rows; ++i) 
-	c.slice(i) = X.row(i).t()*X.row(i)*exp(dot(X.row(i),beta)); 
+        c.slice(i) = X.row(i).t()*X.row(i)*exp(dot(X.row(i),beta)); 
       return c;
     }
-    cube hessianh(vec beta, mat X, mat XD) {
+    cube hessianh(vec const &beta, mat const &X, mat const &XD) const {
       cube c(beta.size(), beta.size(), X.n_rows);
       for (size_t i=0; i<X.n_rows; ++i) {
-	rowvec Xi = X.row(i);
-	rowvec XDi = XD.row(i);
-	c.slice(i) = (XDi.t()*Xi + Xi.t()*XDi + dot(XDi,beta)*Xi.t()*Xi)*exp(dot(Xi,beta));
+	      rowvec Xi = X.row(i);
+	      rowvec XDi = XD.row(i);
+	      c.slice(i) = (XDi.t()*Xi + Xi.t()*XDi + dot(XDi,beta)*Xi.t()*Xi)*exp(dot(Xi,beta));
       }
       return c;
     }
+    
     LogLogLink(SEXP sexp) {}
   };
-  class ArandaOrdazLink : public Link {
+  class ArandaOrdazLink final : public Link {
   public:
-    vec link(vec S) {
+    vec link(vec const &S) const {
       if (thetaAO==0)
 	return log(-log(S));
       else return log((exp(log(S)*(-thetaAO))-1)/thetaAO);
     }
-    vec ilink(vec eta) {
+    vec ilink(vec const &eta) const {
       if (thetaAO==0)
-	return exp(-exp(eta));
-      else return exp(-log(thetaAO*exp(eta)+1)/thetaAO);
+        return exp(-exp(eta));
+      else 
+        return exp(-log(thetaAO*exp(eta)+1)/thetaAO);
     }
-    vec h(vec eta, vec etaD) {
+    vec h(vec const &eta, vec const &etaD) const {
       if (thetaAO==0)
 	return etaD % exp(eta);
       else return exp(eta) % etaD/(thetaAO*exp(eta)+1);
     }
-    vec H(vec eta) {
+    vec H(vec const &eta) const {
       if (thetaAO==0)
-	return exp(eta);
+	      return exp(eta);
       else return log(thetaAO*exp(eta)+1)/thetaAO;
     }
-    mat gradH(vec eta, mat X) {
+    mat gradH(vec const &eta, mat const &X) const {
       if (thetaAO==0)
-	return rmult(X,exp(eta));
-      else return rmult(X,exp(eta)/(1+thetaAO*exp(eta)));
+	       return rmult(X,exp(eta));
+      else 
+        return rmult(X,exp(eta)/(1+thetaAO*exp(eta)));
     }
-    mat gradh(vec eta, vec etaD, mat X, mat XD) { 
+    mat gradh(vec const &eta, vec const &etaD, mat const &X, 
+              mat const &XD) const { 
       if (thetaAO==0)
-	return rmult(XD, exp(eta)) + rmult(X, etaD % exp(eta));
+	      return rmult(XD, exp(eta)) + rmult(X, etaD % exp(eta));
       else {
-	vec denom = (thetaAO*exp(eta)+1) % (thetaAO*exp(eta)+1);
-	return rmult(XD,(thetaAO*exp(2*eta)+exp(eta))/denom)+rmult(X,exp(eta) % etaD/denom);
+	      vec denom = (thetaAO*exp(eta)+1) % (thetaAO*exp(eta)+1);
+	      return rmult(XD,(thetaAO*exp(2*eta)+exp(eta))/denom)+rmult(X,exp(eta) % etaD/denom);
       }
     }
     double thetaAO;
@@ -239,83 +296,115 @@ namespace rstpm2 {
     }
   };
   // Useful relationship: d/dx expit(x)=expit(x)*expit(-x) 
-  class LogitLink : public Link {
+  class LogitLink final : public Link {
   public:
-    vec link(vec S) { return -logit(S); }
-    vec ilink(vec x) { return expit(-x); }
+    vec link(vec const &S) const { 
+      return -logit(S); 
+    }
+    vec ilink(vec const &x) const { 
+      return expit(-x); 
+    }
     // vec h(vec eta, vec etaD) { return etaD % exp(eta) % expit(-eta); }
-    vec h(vec eta, vec etaD) { return etaD % expit(eta); }
-    vec H(vec eta) { return -log(expit(-eta)); }
-    mat gradH(vec eta, mat X) { 
+    vec h(vec const &eta, vec const &etaD) const { 
+      return etaD % expit(eta); 
+    }
+    vec H(vec const &eta) const { 
+      return -log(expit(-eta)); 
+    }
+    mat gradH(vec const &eta, mat const &X) const { 
       return rmult(X,expit(eta));
     }
-    mat gradh(vec eta, vec etaD, mat X, mat XD) { 
+    mat gradh(vec const &eta, vec const &etaD, mat const &X, 
+              mat const &XD) const { 
       // return rmult(X, etaD % exp(eta) % expit(-eta)) - 
       // 	rmult(X, exp(2*eta) % etaD % expit(-eta) % expit(-eta)) +
       // 	rmult(XD, exp(eta) % expit(-eta));
       return rmult(XD, expit(eta)) + 
-	rmult(X, expit(eta) % expit(-eta) % etaD);
+        rmult(X, expit(eta) % expit(-eta) % etaD);
     }
-    cube hessianH(vec beta, mat X) { 
+    cube hessianH(vec const &beta, mat const &X) const { 
       cube c(beta.size(), beta.size(), X.n_rows);
       for (size_t i=0; i<X.n_rows; ++i) {
-	colvec Xi = X.row(i);
-	double Xibeta = dot(Xi,beta);
-	c.slice(i) = Xi.t()*Xi*expit(Xibeta)*expit(-Xibeta); 
+        colvec Xi = X.row(i);
+        double Xibeta = dot(Xi,beta);
+        c.slice(i) = Xi.t()*Xi*expit(Xibeta)*expit(-Xibeta); 
       }
       return c;
     }
-    cube hessianh(vec beta, mat X, mat XD) { 
+    cube hessianh(vec const &beta, mat const &X, mat const &XD) const { 
       cube c(beta.size(), beta.size(), X.n_rows);
       for (size_t i=0; i<X.n_rows; ++i) {
-	colvec Xi = X.row(i);
-	colvec XDi = XD.row(i);
-	double Xibeta = dot(Xi,beta);
-	c.slice(i) = XDi.t()*Xi*expit(Xibeta) + Xi.t()*XDi*expit(-Xibeta)*expit(Xibeta); 
+	      colvec Xi = X.row(i);
+	      colvec XDi = XD.row(i);
+	      double Xibeta = dot(Xi,beta);
+	      c.slice(i) = XDi.t()*Xi*expit(Xibeta) + Xi.t()*XDi*expit(-Xibeta)*expit(Xibeta); 
       }
       return c;
     }
     LogitLink(SEXP sexp) {}
   };
-  class ProbitLink : public Link {
+  class ProbitLink final : public Link {
   public:
-    vec link(vec S) { return -qnorm01(S); }
-    vec ilink(vec eta) { return pnorm01(-eta); }
-    vec H(vec eta) { return -log(pnorm01(-eta)); }
-    vec h(vec eta, vec etaD) { return etaD % dnorm01(-eta) / pnorm01(-eta); }
-    mat gradH(vec eta, mat X) { 
-      return rmult(X, dnorm01(-eta) / pnorm01(-eta));
+    vec link(vec const &S) const { 
+      return -qnorm01(S); 
     }
-    mat gradh(vec eta, vec etaD, mat X, mat XD) { 
-      return rmult(X, -eta % dnorm01(eta) % etaD / pnorm01(-eta)) +
-	rmult(X, dnorm01(eta) % dnorm01(eta) / pnorm01(-eta) / pnorm01(-eta) % etaD) +
-	rmult(XD,dnorm01(eta) / pnorm01(-eta));
+    vec ilink(vec const &eta) const { 
+      return pnorm01(-eta); 
+    }
+    vec H(vec const &eta) const { 
+      return -pnorm01_log(-eta); 
+    }
+    vec h(vec const &eta, vec const &etaD) const {
+      return etaD % dpnorm01_log(-eta); 
+    }
+    mat gradH(vec const &eta, mat const &X) const {
+      return rmult(X, dpnorm01_log(-eta));
+    }
+    mat gradh(vec const &eta, vec const &etaD, mat const &X, 
+              mat const &XD) const {
+      vec const dpnrm_log = dpnorm01_log(-eta);
+      return rmult(X , -eta % etaD % dpnrm_log) +
+	      rmult     (X , etaD % dpnrm_log % dpnrm_log) +
+	      rmult     (XD, dpnrm_log);
     }
     // incomplete implementation
-    cube hessianh(vec beta, mat X, mat XD) { 
+    cube hessianh(vec const &beta, mat const &X, mat const &XD) const { 
       cube c(beta.size(), beta.size(), X.n_rows, fill::zeros);
       return c;
     }
     // incomplete implementation
-    cube hessianH(vec beta, mat X) { 
+    cube hessianH(vec const &beta, mat const &X) const { 
       cube c(beta.size(), beta.size(), X.n_rows, fill::zeros);
       return c;
     }
     ProbitLink(SEXP sexp) {}
   };
-  class LogLink : public Link {
+  class LogLink final : public Link {
   public:
-    vec link(vec S) { return -log(S); }
-    vec ilink(vec x) { return exp(-x); }
-    vec h(vec eta, vec etaD) { return etaD; }
-    vec H(vec eta) { return eta; }
-    mat gradh(vec eta, vec etaD, mat X, mat XD) { return XD; }
-    mat gradH(vec eta, mat X) { return X;  }
-    cube hessianh(vec beta, mat X, mat XD) { 
+    vec link(vec const &S) const { 
+      return -log(S); 
+    }
+    vec ilink(vec const &x) const { 
+      return exp(-x); 
+    }
+    vec h(vec const &eta, vec const &etaD) const { 
+      return etaD; 
+    }
+    vec H(vec const &eta) const { 
+      return eta; 
+    }
+    mat gradh(vec const &eta, vec const &etaD, mat const &X, 
+              mat const &XD) const { 
+      return XD; 
+    }
+    mat gradH(vec const &eta, mat const &X) const { 
+      return X;  
+    }
+    cube hessianh(vec const &beta, mat const &X, mat const &XD) const { 
       cube c(beta.size(), beta.size(), X.n_rows, fill::zeros);
       return c;
     }
-    cube hessianH(vec beta, mat X) { 
+    cube hessianH(vec const &beta, mat const &X) const { 
       cube c(beta.size(), beta.size(), X.n_rows, fill::zeros);
       return c;
     }
@@ -329,7 +418,7 @@ namespace rstpm2 {
     double value = obj->objective(coef % obj->parscale);
     if (obj->bfgs.trace>1) {
       Rprintf("beta="); Rprint(coef);
-      Rprintf("objective=%g\n",value);
+      Rprintf("objective=%.10g\n",value);
     };
     // R_CheckUserInterrupt();  /* be polite -- did the user hit ctrl-C? */
     return value;
@@ -389,8 +478,9 @@ namespace rstpm2 {
   };
   class NelderMead2 : public NelderMead {
   public:
-    NumericMatrix calc_hessian(optimfn fn, void * ex) {
+    NumericMatrix calc_hessian(optimfn fn, void * ex, int debug = 0) {
       if (parscale.size()==0) REprintf("parscale is not defined for NelderMead2::calc_hessian.");
+      if (debug>1) Rprintf("In NelderMead2->calc_hessian()...\n");
       int n = coef.size();
       NumericMatrix hess(n,n);
       double tmpi,tmpj,f1,f0,fm1,hi,hj,fij,fimj,fmij,fmimj;
@@ -427,13 +517,14 @@ namespace rstpm2 {
 	  }
 	}
       }
+      if (debug>1) Rprint(hess);
       return hess;
     }
     vec parscale;
   };
   class Nlm2 : public Nlm {
   public:
-    NumericMatrix calc_hessian(fcn_p fn, void * ex) {
+    NumericMatrix calc_hessian(fcn_p fn, void * ex, int debug = 0) {
       if (parscale.size()==0) REprintf("parscale is not defined for Nlm2::calc_hessian.");
       int n = coef.size();
       NumericMatrix hess(n,n);
@@ -518,8 +609,9 @@ namespace rstpm2 {
 	vec vcoef(&nm.coef[0],this->n);					\
 	satisfied = this->feasible(vcoef % this->parscale);		\
 	if (!satisfied) this->kappa *= 2.0;				\
-      } while ((!satisfied) && this->kappa < this->maxkappa);			\
-      nm.hessian = nm.calc_hessian(&optimfunction<This>, (void *) this); \
+      } while ((!satisfied) && this->kappa < this->maxkappa);		\
+      if (this->bfgs.trace > 1) Rprintf("Calculating hessian...\n");	\
+      nm.hessian = nm.calc_hessian(&optimfunction<This>, (void *) this, this->bfgs.trace); \
       this->bfgs.coef = nm.coef;					\
       this->bfgs.hessian = nm.hessian;					\
     }									\
@@ -565,18 +657,18 @@ namespace rstpm2 {
       List list = as<List>(sexp);
       std::string linkType = as<std::string>(list["link"]);
       if (linkType=="PH")
-	link=new LogLogLink(sexp);
+	      link=new LogLogLink(sexp);
       else if (linkType=="PO")
-	link=new LogitLink(sexp);
+	      link=new LogitLink(sexp);
       else if (linkType=="probit")
-	link=new ProbitLink(sexp);
+	      link=new ProbitLink(sexp);
       else if (linkType=="AH")
-	link=new LogLink(sexp);
+	      link=new LogLink(sexp);
       else if (linkType=="AO")
-	link=new ArandaOrdazLink(sexp);
+	      link=new ArandaOrdazLink(sexp);
       else {
-	REprintf("No matching link.type");
-	return;
+	      REprintf("No matching link.type");
+	      return;
       }
       bfgs.coef = init = as<NumericVector>(list["init"]);
       X = as<mat>(list["X"]); 
@@ -675,7 +767,7 @@ namespace rstpm2 {
       li_constraint out = {li, constraint};
       return out;
     }
-    li_constraint li(vec eta, vec etaD, vec eta0, vec eta1) {
+    li_constraint li(vec eta, vec etaD, vec eta0, vec eta1, vec beta) {
       if (interval) {
 	return li_interval(eta+offset, etaD, eta1+offset);
       }
@@ -695,20 +787,20 @@ namespace rstpm2 {
     vec getli(vec beta) {
       vec vbeta = beta;
       vbeta.resize(nbeta);
-      li_constraint lic = li(X*vbeta, XD*vbeta, X0*vbeta, X1*vbeta);
+      li_constraint lic = li(X*vbeta, XD*vbeta, X0*vbeta, X1*vbeta, beta);
       return lic.li;
     }
     mat getgradli(vec beta) {
       vec vbeta = beta;
       vbeta.resize(nbeta);
-      gradli_constraint gradlic = gradli(X*vbeta, XD*vbeta, X0*vbeta, X1*vbeta, X, XD, X0, X1);
+      gradli_constraint gradlic = gradli(X*vbeta, XD*vbeta, X0*vbeta, X1*vbeta, X, XD, X0, X1, beta);
       return gradlic.gradli;
     }
     // negative log-likelihood
     double objective(vec beta) {
       vec vbeta = beta;
       vbeta.resize(nbeta);
-      li_constraint s = li(X * vbeta, XD * vbeta, X0 * vbeta, X1 * vbeta);
+      li_constraint s = li(X * vbeta, XD * vbeta, X0 * vbeta, X1 * vbeta, beta);
       return -sum(s.li) + s.constraint;
     }
     // finite-differencing of the gradient for the objective
@@ -831,7 +923,7 @@ namespace rstpm2 {
       return out;
     }
     gradli_constraint gradli(vec eta, vec etaD, vec eta0, vec eta1,
-				     mat X, mat XD, mat X0, mat X1) {
+			     mat X, mat XD, mat X0, mat X1, vec beta) {
       if (interval) return gradli_interval_censored(eta, etaD, eta1, X, XD, X1);
       else {
 	gradli_constraint s = gradli_right_censored(eta, etaD, X, XD);
@@ -846,7 +938,7 @@ namespace rstpm2 {
     // gradient of the negative log-likelihood
     vec gradient(vec beta) {
       gradli_constraint gc = gradli(X * beta, XD * beta, X0 * beta, X1 * beta,
-				    X, XD, X0, X1);
+				    X, XD, X0, X1, beta);
       rowvec dconstraint = sum(gc.constraint,0);
       rowvec vgr = sum(gc.gradli,0);
       vec gr(n);
@@ -1281,24 +1373,23 @@ namespace rstpm2 {
       vec vbeta = beta;
       vbeta.resize(this->nbeta);
       // copy across to this->bfgs.coef?
-      li_constraint s = li(this->X * vbeta, this->XD * vbeta, this->X0 * vbeta, this->X1 * vbeta);
+      li_constraint s = li(this->X * vbeta, this->XD * vbeta, this->X0 * vbeta, this->X1 * vbeta, beta);
       return -sum(s.li) + s.constraint;
     }
     vec getli(vec beta) {
       vec vbeta = beta;
       vbeta.resize(this->nbeta);
-      li_constraint lic = li(this->X*vbeta, this->XD*vbeta, this->X0*vbeta, this->X1*vbeta);
+      li_constraint lic = li(this->X*vbeta, this->XD*vbeta, this->X0*vbeta, this->X1*vbeta, beta);
       return lic.li;
     }
     mat getgradli(vec beta) {
       vec vbeta = beta;
       vbeta.resize(this->nbeta);
-      gradli_constraint gradlic = gradli(this->X*vbeta, this->XD*vbeta, this->X0*vbeta, this->X1*vbeta, this->X, this->XD, this->X0, this->X1);
+      gradli_constraint gradlic = gradli(this->X*vbeta, this->XD*vbeta, this->X0*vbeta, this->X1*vbeta, this->X, this->XD, this->X0, this->X1, beta);
       return gradlic.gradli;
     }
-    li_constraint li(vec eta, vec etaD, vec eta0, vec eta1) {
+    li_constraint li(vec eta, vec etaD, vec eta0, vec eta1, vec beta) {
       vec ll(clusters.size(), fill::zeros);
-      vec beta = as<vec>(this->bfgs.coef);
       int n = beta.size();
       vec vbeta(beta); // logtheta is the last parameter in beta
       vbeta.resize(this->nbeta);
@@ -1347,7 +1438,7 @@ namespace rstpm2 {
     vec gradient(vec beta) {
       vec vbeta = beta;
       vbeta.resize(this->nbeta);
-      gradli_constraint gc = gradli(this->X*vbeta, this->XD*vbeta, this->X0*vbeta, this->X1*vbeta, this->X, this->XD, this->X0, this->X1);
+      gradli_constraint gc = gradli(this->X*vbeta, this->XD*vbeta, this->X0*vbeta, this->X1*vbeta, this->X, this->XD, this->X0, this->X1, beta);
       rowvec dconstraint = sum(gc.constraint,0);
       rowvec vgr = sum(gc.gradli,0);
       vec gr(beta.size());
@@ -1356,8 +1447,8 @@ namespace rstpm2 {
       }
       return -gr;
     }
-    gradli_constraint gradli(vec eta, vec etaD, vec eta0, vec eta1, mat X, mat XD, mat X0, mat X1) { 
-      vec beta = as<vec>(this->bfgs.coef);
+    gradli_constraint gradli(vec eta, vec etaD, vec eta0, vec eta1, mat X, mat XD, mat X0, mat X1,
+			     vec beta) { 
       int n = beta.size();
       mat gr = zeros<mat>(clusters.size(), n);
       mat grconstraint = zeros<mat>(clusters.size(), n);
@@ -1442,6 +1533,150 @@ namespace rstpm2 {
     bool recurrent;
   };
 
+  /** 
+      Extension of stpm2 and pstpm2 to include Clayton copula 
+  **/
+  template<class Base>
+  class ClaytonCopula : public Base {
+  public:
+    typedef std::vector<int> Index;
+    typedef std::map<int,Index> IndexMap;
+    typedef ClaytonCopula<Base> This;
+    ClaytonCopula(SEXP sexp) : Base(sexp) {
+      List list = as<List>(sexp);
+      ivec cluster = as<ivec>(list["cluster"]);
+      this->nbeta = this->n - 1;
+      // wragged array indexed by a map of vectors
+      for (size_t id=0; id<cluster.size(); ++id) {
+	clusters[cluster[id]].push_back(id);
+      }
+    }
+    /** 
+	Objective function for a Clayton copula
+	Assumes that weights == 1.
+    **/
+    double objective(vec beta) {
+      vec vbeta = beta;
+      vbeta.resize(this->nbeta);
+      // copy across to this->bfgs.coef?
+      li_constraint s = li(this->X * vbeta, this->XD * vbeta, this->X0 * vbeta, this->X1 * vbeta, beta);
+      return -sum(s.li) + s.constraint;
+    }
+    vec getli(vec beta) {
+      vec vbeta = beta;
+      vbeta.resize(this->nbeta);
+      li_constraint lic = li(this->X*vbeta, this->XD*vbeta, this->X0*vbeta, this->X1*vbeta, beta);
+      return lic.li;
+    }
+    mat getgradli(vec beta) { // WRONG - DO NOT USE!
+      vec vbeta = beta;
+      vbeta.resize(this->nbeta);
+      gradli_constraint gradlic = gradli(this->X*vbeta, this->XD*vbeta, this->X0*vbeta, this->X1*vbeta, this->X, this->XD, this->X0, this->X1, beta);
+      return gradlic.gradli;
+    }
+    li_constraint li(vec eta, vec etaD, vec eta0, vec eta1, vec beta) {
+      vec ll(clusters.size(), fill::zeros);
+      int n = beta.size();
+      vec vbeta(beta); // logtheta is the last parameter in beta
+      vbeta.resize(this->nbeta);
+      double itheta = exp(-beta[n-1]); // NOTE: INVERSE OF THE VARIANCE
+      eta = this->X * vbeta + this->offset;
+      etaD = this->XD * vbeta;
+      vec h = this->link->h(eta,etaD) + this->bhazard;
+      vec H = this->link->H(eta);
+      double constraint = this->kappa/2.0 * (sum(h % h % (h<0)) + sum(H % H % (H<0)));
+      vec eps = h*0.0 + 1.0e-16; 
+      h = max(h,eps);
+      H = max(H,eps);
+      int i=0;
+      for (IndexMap::iterator it=clusters.begin(); it!=clusters.end(); ++it, ++i) {
+	uvec index = conv_to<uvec>::from(it->second);
+	int ni = (it->second).size();
+	int mi = sum(this->event(index));
+	double logScopula = -itheta*log(sum(exp(H(index)/itheta)) - ni + 1);
+	// Rprintf("ni=%i, mi=%i, log(Scopula)=%g\n",ni,mi,logScopula);
+	if (mi==0) {
+	  ll(i) = logScopula;
+	}
+	else {
+	  ll(i) = logScopula/itheta*(itheta+mi);
+	  // Rprintf("ll(i)=%g\n",ll(i));
+	  ll(i) += sum((log(h(index))+H(index)/itheta) % this->event(index));
+	  for (int k=1; k<=mi; ++k)
+	    ll(i) += log(itheta+k-1.0) - log(itheta);
+	} 
+      }
+      li_constraint out;
+      out.constraint=constraint;
+      out.li = ll;
+      return out;
+    }
+    vec gradient(vec beta) { // WRONG - DO NOT USE!
+      vec vbeta = beta;
+      vbeta.resize(this->nbeta);
+      gradli_constraint gc = gradli(this->X*vbeta, this->XD*vbeta, this->X0*vbeta, this->X1*vbeta, this->X, this->XD, this->X0, this->X1, beta);
+      rowvec dconstraint = sum(gc.constraint,0);
+      rowvec vgr = sum(gc.gradli,0);
+      vec gr(beta.size());
+      for (size_t i = 0; i<beta.size(); ++i) {
+	gr[i] = vgr[i];// - dconstraint[i];
+      }
+      return -gr;
+    }
+    gradli_constraint gradli(vec eta, vec etaD, vec eta0, vec eta1, mat X, mat XD, mat X0, mat X1, vec beta) { // WRONG - DO NOT USE!
+      int n = beta.size();
+      mat gr = zeros<mat>(clusters.size(), n);
+      mat grconstraint = zeros<mat>(clusters.size(), n);
+      vec vbeta(beta); // theta is the last parameter in beta
+      vbeta.resize(n-1);
+      double itheta = exp(-beta[n-1]);
+      // eta = this->X * vbeta;
+      // etaD = this->XD * vbeta;
+      vec h = this->link->h(eta,etaD);
+      vec H = this->link->H(eta);
+      mat gradh = this->link->gradh(eta,etaD,this->X,this->XD);
+      mat gradH = this->link->gradH(eta,this->X);
+      vec eps = h*0.0 + 1.0e-16; 
+      h = max(h,eps);
+      H = max(H,eps);
+      int i=0;
+      for (IndexMap::iterator it=clusters.begin(); it!=clusters.end(); ++it, ++i) {
+	uvec index = conv_to<uvec>::from(it->second);
+	int ni = (it->second).size();
+	int mi = sum(this->event(index));
+	double Scopula0 = sum(exp(H(index)/itheta)) - ni + 1;
+	vec gradEi = zeros<vec>(n-1);
+	vec gradHexpHi = zeros<vec>(n-1);
+	vec gradH0i = zeros<vec>(n-1);
+	for (Index::iterator j=it->second.begin(); j!=it->second.end(); ++j) {
+	  gradHexpHi += gradH.row(*j).t() * exp(H(*j)/itheta) / itheta;
+	  if (this->event(*j)==1) {
+	    gradEi += gradH.row(*j).t() / itheta + gradh.row(*j)/h(*j);
+	  }
+	  grconstraint(i,span(0,n-2)) += this->kappa * ((gradh.row(*j) * h(*j) * (h(*j)<0)) + (gradH.row(*j) * H(*j) * (H(*j)<0)));
+	}
+	for (int k=0; k<n-1; ++k) {
+	  gr(i,k) += -(itheta+mi)*gradHexpHi(k)/Scopula0;
+	}
+	if (mi>0) {
+	  for (int k=0; k<n-1; ++k) {
+	    gr(i,k) += gradEi(k);
+	  }
+	}
+      }
+      gradli_constraint grli = {gr, grconstraint};
+      return grli;  
+    }
+    bool feasible(vec beta) {
+      vec coef(beta);
+      coef.resize(this->n-1);
+      return Base::feasible(coef);
+    }
+    OPTIM_FUNCTIONS;
+    IndexMap clusters;
+  };
+
+  
 
   /** @brief Wrapper for calling an objective_cluster method
    **/
@@ -1529,13 +1764,13 @@ namespace rstpm2 {
 	  double bi = sqrt(2.0)*sigma*this->gauss_x(k);
 	  if (left_trunc_not_recurrent) {
 	    this->delayed = false; 
-	    lik = Base::li(eta+Z*bi,etaD,eta0+Z0*bi,eta1+Z*bi);
+	    lik = Base::li(eta+Z*bi,etaD,eta0+Z0*bi,eta1+Z*bi,beta);
 	    this->delayed = true; 
 	    H0ik = Base::li_left_truncated(eta0+Z0*bi);
 	    L0j += exp(-sum(H0ik.li))*wstar(k);
 	    constraint += H0ik.constraint;
 	  } else {
-	    lik = Base::li(eta+Z*bi,etaD,eta0+Z0*bi,eta1+Z*bi);
+	    lik = Base::li(eta+Z*bi,etaD,eta0+Z0*bi,eta1+Z*bi,beta);
 	  }
 	  Lj += exp(sum(lik.li))*wstar(k);
 	  constraint += lik.constraint;
@@ -1606,7 +1841,7 @@ namespace rstpm2 {
 	  if (left_trunc_not_recurrent) {
 	    // first: reset such that delayed is true and calculate the likelihood for right censoring
 	    this->delayed = false; 
-	    lik = Base::li(eta+Z*bi,etaD,eta0+Z0*bi,eta1+Z*bi);
+	    lik = Base::li(eta+Z*bi,etaD,eta0+Z0*bi,eta1+Z*bi,beta);
 	    // second: reset for delayed is true and calculate the likelihood for left truncation
 	    this->delayed = true; 
 	    l0ik = Base::li_left_truncated(eta0+Z0*bi);
@@ -1614,7 +1849,7 @@ namespace rstpm2 {
 	    g0 = exp(sum(l0ik.li)+R::dnorm(bi,0.0,sigma,1));
 	    L0j += sqrt(2.0)*tau*g0*gauss_w(k)*exp(gauss_x(k)*gauss_x(k));
 	  } else {
-	    lik = Base::li(eta+Z*bi,etaD,eta0+Z0*bi,eta1+Z*bi);
+	    lik = Base::li(eta+Z*bi,etaD,eta0+Z0*bi,eta1+Z*bi,beta);
 	  }
 	  g = exp(sum(lik.li)+R::dnorm(bi,0.0,sigma,1));
 	  Lj += sqrt(2.0)*tau*g*gauss_w(k)*exp(gauss_x(k)*gauss_x(k));
@@ -1680,7 +1915,7 @@ namespace rstpm2 {
 	eta0 = this->X0 * vbeta;
 	eta1 = this->X1 * vbeta;
       }
-      li_constraint lik = Base::li(eta+Z*bi,etaD,eta0+Z0*bi,eta1+Z*bi);
+      li_constraint lik = Base::li(eta+Z*bi,etaD,eta0+Z0*bi,eta1+Z*bi,vbeta);
       double ll = sum(lik.li) + R::dnorm(bi,0.0,sigma,1);
       return -ll;
     }
@@ -1700,7 +1935,7 @@ namespace rstpm2 {
       mat XD = mat(this->XD.n_rows,1,fill::zeros);
       mat X0 = mat(Z0); // mat(this->X0.n_rows,1,fill::ones);
       mat X1 = mat(Z); // mat(this->X1.n_rows,1,fill::ones);
-      gradli_constraint gradlik = Base::gradli(eta+Z*bi,etaD,eta0+Z0*bi,eta1+Z*bi,X,XD,X0,X1);
+      gradli_constraint gradlik = Base::gradli(eta+Z*bi,etaD,eta0+Z0*bi,eta1+Z*bi,X,XD,X0,X1,vbeta);
       rowvec gradll = sum(gradlik.gradli,0) - bi/sigma/sigma;
       return -gradll(0);
     }
@@ -1762,9 +1997,9 @@ namespace rstpm2 {
 	  vec etaDstar = XDstar * betastar;
 	  vec eta0star = X0star * betastar;
 	  vec eta1star = X1star * betastar;
-	  li_constraint lik = Base::li(etastar,etaDstar,eta0star,eta1star);
+	  li_constraint lik = Base::li(etastar,etaDstar,eta0star,eta1star,beta);
 	  double g = exp(sum(lik.li) + R::dnorm(bi,0.0,sigma,1));
-	  gradli_constraint gradlik = Base::gradli(etastar, etaDstar, eta0star, eta1star,Xstar, XDstar, X0star, X1star);
+	  gradli_constraint gradlik = Base::gradli(etastar, etaDstar, eta0star, eta1star,Xstar, XDstar, X0star, X1star,beta);
 	  Lj += sqrt(2.0)*tau*g*gauss_w(k)*exp(gauss_x(k)*gauss_x(k));
 	  rowvec numeratorstar = sqrt(2.0)*tau*g*sum(gradlik.gradli,0)*gauss_w(k)*exp(gauss_x(k)*gauss_x(k));
 	  numerator(span(0,n-2)) += numeratorstar(span(0,n-2));
@@ -1808,8 +2043,8 @@ namespace rstpm2 {
 		vec etaDstar = XDstar * betastar;
 		vec eta0star = X0star * betastar;
 		vec eta1star = X1star * betastar;
-		li_constraint lik = Base::li(etastar, etaDstar, eta0star, eta1star);
-		gradli_constraint gradlik = Base::gradli(etastar, etaDstar, eta0star, eta1star,Xstar, XDstar, X0star, X1star);
+		li_constraint lik = Base::li(etastar, etaDstar, eta0star, eta1star,beta);
+		gradli_constraint gradlik = Base::gradli(etastar, etaDstar, eta0star, eta1star,Xstar, XDstar, X0star, X1star,beta);
 		// adjust the last column of the gradient to account for the variance components:
 			// chain rule: d lik/d bi * d bi/d nu where bi = sqrt(2)*exp(nu/2)*x_k
 		gradlik.gradli.col(gradlik.gradli.n_cols-1) *= bi*0.5;
@@ -1945,13 +2180,13 @@ namespace rstpm2 {
 	    bi = SqrtSigma * dk;
 	    if (left_trunc_not_recurrent) {
 	      this->delayed = false; 
-	      lik = Base::li(eta+Z*bi,etaD,eta0+Z0*bi,eta1+Z*bi);
+	      lik = Base::li(eta+Z*bi,etaD,eta0+Z0*bi,eta1+Z*bi,beta);
 	      this->delayed = true; 
 	      H0ik = Base::li_left_truncated(eta0+Z0*bi);
 	      L0j += exp(-sum(H0ik.li))*wstar(k)*wstar(kk);
 	      constraint += H0ik.constraint;
 	    } else {
-	      lik = Base::li(eta+Z*bi,etaD,eta0+Z0*bi,eta1+Z*bi);
+	      lik = Base::li(eta+Z*bi,etaD,eta0+Z0*bi,eta1+Z*bi,beta);
 	    }
 	    Lj += exp(sum(lik.li))*wstar(k)*wstar(kk);
 	    constraint += lik.constraint;
@@ -1975,7 +2210,7 @@ namespace rstpm2 {
 	eta0 = this->X0 * vbeta;
 	eta1 = this->X1 * vbeta;
       }
-      li_constraint lik = Base::li(eta+Z*bi,etaD,eta0+Z0*bi,eta1+Z*bi);
+      li_constraint lik = Base::li(eta+Z*bi,etaD,eta0+Z0*bi,eta1+Z*bi,vbeta);
       vec zero(redim,fill::zeros);
       double ll = sum(lik.li) + dmvnrm_arma(bi,zero,this->Sigma,true);
       return -ll;
@@ -1995,7 +2230,7 @@ namespace rstpm2 {
       mat XD = mat(this->XD.n_rows,redim,fill::zeros);
       mat X0 = Z0; 
       mat X1 = Z; 
-      gradli_constraint gradlik = Base::gradli(eta+Z*bi,etaD,eta0+Z0*bi,eta1+Z*bi,X,XD,X0,X1);
+      gradli_constraint gradlik = Base::gradli(eta+Z*bi,etaD,eta0+Z0*bi,eta1+Z*bi,X,XD,X0,X1,vbeta);
       vec gradll = (sum(gradlik.gradli,0)).t() - invSigma*bi;
       return -gradll;
     }
@@ -2112,13 +2347,13 @@ namespace rstpm2 {
 	    li_constraint lik, l0ik;
 	    if (left_trunc_not_recurrent) {
 	      this->delayed = false; 
-	      lik = Base::li(eta+Z*bi,etaD,eta0+Z0*bi,eta1+Z*bi);
+	      lik = Base::li(eta+Z*bi,etaD,eta0+Z0*bi,eta1+Z*bi,beta);
 	      this->delayed = true; 
 	      l0ik = Base::li_left_truncated(eta0+Z0*bi);
 	      g0 = exp(sum(l0ik.li)+dmvnrm_arma(bi,zero,Sigma,true));
 	      L0j += wstar(k)*wstar(kk)*g0*exp(dot(d,d)/2);
 	    } else {
-	      lik = Base::li(eta+Z*bi,etaD,eta0+Z0*bi,eta1+Z*bi);
+	      lik = Base::li(eta+Z*bi,etaD,eta0+Z0*bi,eta1+Z*bi,beta);
 	    }
 	    g = exp(sum(lik.li)+dmvnrm_arma(bi,zero,Sigma,true));
 	    Lj += wstar(k)*wstar(kk)*g*exp(dot(d,d)/2);
@@ -2176,8 +2411,8 @@ namespace rstpm2 {
 	    vec etaDstar = XDstar * betastar;
 	    vec eta0star = X0star * betastar;
 	    vec eta1star = X1star * betastar;
-	    li_constraint lik = Base::li(etastar, etaDstar, eta0star, eta1star);
-	    gradli_constraint gradlik = Base::gradli(etastar, etaDstar, eta0star, eta1star,Xstar, XDstar, X0star, X1star);
+	    li_constraint lik = Base::li(etastar, etaDstar, eta0star, eta1star,beta);
+	    gradli_constraint gradlik = Base::gradli(etastar, etaDstar, eta0star, eta1star,Xstar, XDstar, X0star, X1star,beta);
 	    // adjust the last columns of the gradient to account for the variance components:
 	    // chain rule: d lik/d bi * d bi/d nu
 	    int restart = gradlik.gradli.n_cols-redim, restop = gradlik.gradli.n_cols-1;
@@ -2236,8 +2471,8 @@ namespace rstpm2 {
 	    vec etaDstar = XDstar * betastar;
 	    vec eta0star = X0star * betastar;
 	    vec eta1star = X1star * betastar;
-	    li_constraint lik = Base::li(etastar, etaDstar, eta0star, eta1star);
-	    gradli_constraint gradlik = Base::gradli(etastar, etaDstar, eta0star, eta1star,Xstar, XDstar, X0star, X1star);
+	    li_constraint lik = Base::li(etastar, etaDstar, eta0star, eta1star,beta);
+	    gradli_constraint gradlik = Base::gradli(etastar, etaDstar, eta0star, eta1star,Xstar, XDstar, X0star, X1star,beta);
 	    // adjust the last columns of the gradient to account for the variance components:
 	    // chain rule: d lik/d bi * d bi/d nu
 	    int restart = gradlik.gradli.n_cols-redim, restop = gradlik.gradli.n_cols-1;
@@ -2431,7 +2666,33 @@ namespace rstpm2 {
       return wrap(-1);
     }
   }
+  
+  class prof_class {
+  public:
+    prof_class(const std::string &name){
+#ifdef DO_PROF
+      std::stringstream ss;
+      auto t = std::time(nullptr);
+      auto tm = *std::localtime(&t);
+      ss << "profile-" << name 
+         << std::put_time(&tm, "-%d-%m-%Y-%H-%M-%S.log");
+      Rcpp::Rcout << "Saving profile output to '" << ss.str() << "'" 
+                  << std::endl;
+      const std::string s = ss.str();
+      ProfilerStart(s.c_str());
+#endif
+    }
+    
+#ifdef DO_PROF
+    ~prof_class(){
+      ProfilerStop();
+    }
+#endif
+  };
+  
   RcppExport SEXP model_output(SEXP args) {
+    prof_class prof("model_output");
+    
     List list = as<List>(args);
     std::string type = as<std::string>(list["type"]);
     if (type=="stpm2") {
@@ -2459,6 +2720,12 @@ namespace rstpm2 {
     else if (type=="pstpm2_normal_frailty_2d") {
       // order is important here
       return pstpm2_model_output_<Pstpm2<NormalSharedFrailty2D<Stpm2>,SmoothLogH> >(args);
+    }
+    else if (type=="stpm2_clayton_copula") {
+      return stpm2_model_output_<ClaytonCopula<Stpm2> >(args);
+    }
+    else if (type=="pstpm2_clayton_copula") {
+      return pstpm2_model_output_<Pstpm2<ClaytonCopula<Stpm2>,SmoothLogH> >(args);
     }
     else {
       REprintf("Unknown model type.\n");
