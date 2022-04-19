@@ -684,7 +684,7 @@ gsm <- function(formula, data, smooth.formula = NULL, smooth.args = NULL,
     counting <- attr(eventInstance,"type") == "counting"
     interval <- attr(eventInstance,"type") == "interval"
     timeExpr <- lhs(formula)[[if (delayed && !interval) 3 else 2]] # expression
-    eventExpr <- if (interval) lhs(formula)[[4]] else lhs(formula)[[length(lhs(formula))]]
+    eventExpr <- if (interval) lhs(formula)[[4]] else lhs(formula)[[if (delayed) 4 else 3]]
     if (interval)
         time2Expr <- lhs(formula)[[3]]
     if (timeVar == "")
@@ -788,7 +788,7 @@ gsm <- function(formula, data, smooth.formula = NULL, smooth.args = NULL,
     lm.formula <- formula(full.formula)
     base.formula <- formula
     ## Specials:
-    specials.names <- c("cluster","bhazard")
+    specials.names <- c("cluster","bhazard","offset")
     specials <- attr(terms.formula(formula, specials.names), "specials")
     spcall <- mf
     spcall[[1]] <- quote(stats::model.frame)
@@ -800,21 +800,30 @@ gsm <- function(formula, data, smooth.formula = NULL, smooth.args = NULL,
         if (length(cluster.index)>0) {
             cluster <- mf2[, cluster.index]
             frailty = !is.null(cluster) && !robust && !copula
-            base.formula <- formula(stats::drop.terms(terms(mf2), cluster.index - 1, keep.response=TRUE))
             cluster.index2 <- attr(terms.formula(full.formula, "cluster"), "specials")$cluster
+            base.formula <- formula(stats::drop.terms(terms(mf2), cluster.index - 1, keep.response=TRUE))
             lm.formula <- formula(stats::drop.terms(terms(full.formula), cluster.index2 - 1))
+        } else {
+            cluster.index2 = NULL
         }
         if (length(bhazard.index)>0) {
             bhazard <- mf2[, bhazard.index]
-            base.formula <- formula(stats::drop.terms(terms(mf2), bhazard.index - 1, keep.response=TRUE))
             bhazard.index2 <- attr(terms.formula(full.formula, "bhazard"), "specials")$bhazard
+            termobj = terms(mf2)
+            dropped.terms = if(length(attr(termobj,"term.labels"))==1) reformulate("1", response=termobj[[2L]], intercept=TRUE, env=environment(termobj)) else stats::drop.terms(terms(mf2), bhazard.index - 1, keep.response=TRUE)
+            base.formula <- formula(dropped.terms)
             lm.formula <- formula(stats::drop.terms(terms(full.formula), bhazard.index2 - 1))
+        } else {
+            bhazard.index2 = NULL
         }
         if (length(cluster.index)>0 && length(bhazard.index)>0) {
-            base.formula <- formula(stats::drop.terms(terms(mf2), c(cluster.index,bhazard.index) - 1,
-                                               keep.response=TRUE))
+            dropped.terms = if(length(attr(termobj,"term.labels"))==2) reformulate("1", response=termobj[[2L]], intercept=TRUE, env=environment(termobj)) else stats::drop.terms(terms(mf2), c(cluster.index,bhazard.index) - 1, keep.response=TRUE)
+            base.formula <- formula(dropped.terms)
+            ## base.formula <- formula(stats::drop.terms(terms(mf2),
+            ##                                           c(cluster.index,bhazard.index) - 1,
+            ##                                           keep.response=TRUE))
             lm.formula <- formula(stats::drop.terms(terms(full.formula),
-                                             c(cluster.index2,bhazard.index2) - 1))
+                                                    c(cluster.index2,bhazard.index2) - 1))
         }
         ## rm(mf2,spcall)
     }
@@ -841,7 +850,7 @@ gsm <- function(formula, data, smooth.formula = NULL, smooth.args = NULL,
                       character=data[[bhazard]])
     ##
     subset.expr <- substitute(subset)
-    if(class(subset.expr)=="NULL") subset.expr <- TRUE
+    if(inherits(subset.expr,"NULL")) subset.expr <- TRUE
     .include <- complete.cases(model.matrix(formula, data)) &
         !is.na(eval(eventExpr,data,parent.frame())) &
         eval(subset.expr,data,parent.frame())
@@ -1497,6 +1506,10 @@ pstpm2 <- function(formula, data, weights=NULL, subset=NULL, coxph.strata=NULL, 
     out
 }
 
+setMethod("update", "stpm2", function(object, ...) {
+    object@call = object@Call
+    update.default(object, ...)
+})
 setMethod("show", "stpm2",
           function(object) {
               object@call.orig <- object@Call
@@ -2451,6 +2464,16 @@ eform.stpm2 <- function (object, parm, level = 0.95, method = c("Profile","Delta
               val[parm, ]
           }
 setMethod("eform", signature(object="stpm2"), eform.stpm2)
+eform.default <- function(object, parm, level = 0.95, method=c("Delta","Profile"), name="exp(beta)", ...) {
+  method <- match.arg(method)
+  if (missing(parm))
+      parm <- TRUE
+  if (method == "Profile") class(object) <- c(class(object),"glm")
+  estfun <- switch(method, Profile = confint, Delta = stats::confint.default)
+  val <- exp(cbind(coef = coef(object), estfun(object, level = level)))
+  colnames(val) <- c(name,colnames(val)[-1])
+  val[parm, ]
+}
 
 derivativeDesign <- 
 function (functn, lower = -1, upper = 1, rule = NULL,

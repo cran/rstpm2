@@ -18,6 +18,292 @@
 ##   require(bbmle)
 ## }
 
+## gradient for penalty in the AFT model
+library(Rcpp)
+library(RcppArmadillo)
+fdiff = \(f,x,eps=1e-5)
+    sapply(1:length(x),
+           \(i) (f("[<-"(x,i,x[i]+eps)) - f("[<-"(x,i,x[i]-eps)))/2/eps)
+src = "#include <RcppArmadillo.h>
+using namespace arma;
+// [[Rcpp::depends(RcppArmadillo)]]
+// [[Rcpp::export]]
+mat differenceMatrix(int n) {
+  return join_rows(zeros(n-1,1),eye(n-1,n-1)) - join_rows(eye(n-1,n-1),zeros(n-1,1));
+}
+// [[Rcpp::export]]
+vec quadraticPenalty(mat Q, vec beta) {
+  vec delta = differenceMatrix(Q.n_rows) * Q * beta;
+  return delta % delta % (delta<0);
+}
+// [[Rcpp::export]]
+vec gradientPenalty(mat Q, vec beta) { // Q: (nbeta+2) x nbeta 
+  size_t n = Q.n_rows;
+  mat D = join_rows(zeros(n-1,1),eye(n-1,n-1)) - join_rows(eye(n-1,n-1),zeros(n-1,1)); // (nbeta+1) x (nbeta+2)
+  vec delta = D * Q * beta; // nbeta+1
+  mat M = Q.t() * D.row(0).t() * D.row(0) * Q * (delta(0)<0.0); // nbeta x nbeta
+  for(size_t j=1; j<delta.size(); j++) {
+    if (delta(j)<0.0)
+      M += Q.t() * D.row(j).t() * D.row(j) * Q;
+  }
+  return 2*M*beta;
+}
+// [[Rcpp::export]]
+vec gradientPenalty2(mat Q, vec beta) { // Q: (nbeta+2) x nbeta; beta: nbeta
+  vec betaStar = Q * beta; // nbeta+2
+  size_t n = Q.n_rows; // nbeta+2
+  mat D(n-1,n); // nbeta+1 x nbeta+2
+  D.zeros();
+  for(size_t i=0; i<n-1; i++)
+    if (betaStar(i)>betaStar(i+1)) {
+      D(i,i) = -1.0;
+      D(i,i+1) = 1.0;
+    }
+  mat M = Q.t() * D.t() * D * Q; // nbeta x nbeta
+  return 2*M*beta;
+}
+"
+sourceCpp(code=src)
+##
+library(rstpm2)
+Qmat = attr(nsx(1:10,df=3,intercept = TRUE),"q.const") # 5x3
+differenceMatrix(nrow(Qmat)) # 4x5
+quadraticPenalty(Qmat, c(1,-1,1)) # 4x1
+as.vector(gradientPenalty(Qmat, c(1,-1,1))) 
+as.vector(gradientPenalty2(Qmat, c(1,-1,1))) 
+fdiff(\(x) sum(quadraticPenalty(Qmat, x)), c(1,-1,1), 1e-5)
+as.vector(gradientPenalty(Qmat, c(1,-1,1))) - 
+    fdiff(\(x) sum(quadraticPenalty(Qmat, x)), c(1,-1,1), 1e-3)
+
+quadraticPenalty(Qmat, c(1,-1,2)) # 4x1
+gradientPenalty(Qmat, c(1,-1,2))
+
+## Error report by Joshua (now fixed)
+## Load package
+library(rstpm2)
+## Define start time
+brcancer2 <- transform(brcancer,
+                       startTime = ifelse(hormon == 0, rectime * 0.5, 0))
+## Stpm2 call without explicit specification of the type argument
+stpm2(Surv(startTime, rectime, censrec == 1) ~ hormon,
+      data = brcancer2,
+      df = 3)
+## Stpm2 call with explicit specification of the type argument
+## Do not run, this will cause your R-session to terminate
+## debug(gsm)
+stpm2(Surv(startTime, rectime, censrec == 1, type = "counting") ~ hormon,
+      data = brcancer2,
+      df = 3)
+
+## Are 2D thin-plate spline approximations in mgcv dense matrices?
+library(mgcv)
+df=expand.grid(u=seq(0,1,length=100),v=seq(0,1,length=100))
+set.seed(12345)
+df=transform(df,y=rnorm(nrow(df),sin(u*2*pi)*cos(v*2*pi),0.1))
+gam1=gam(y~s(u,v,bs="ts"),data=df)
+
+## Email from Grace
+library(rstpm2)
+fit = gsm(Surv(rectime,censrec==1)~hormon,data=brcancer,df=3)
+fit@lm
+attr(fit@lm$terms, "predvars")
+nd = data.frame(rectime=1000, hormon=0)
+rstpm2:::lpmatrix.lm(fit@lm, nd) %*% coef(fit) # or, more simply
+predict(fit@lm, nd)
+##
+eps=1e-4
+(predict(fit@lm, data.frame(rectime=1000+eps, hormon=0)) -
+ predict(fit@lm, data.frame(rectime=1000-eps, hormon=0)))/2/eps
+## or 
+(predict(fit@lm, data.frame(rectime=1000*exp(eps), hormon=0)) -
+ predict(fit@lm, data.frame(rectime=1000*exp(-eps), hormon=0)))/2/eps/1000
+##
+exp(predict(fit@lm, nd))*
+    (predict(fit@lm, data.frame(rectime=1000*exp(eps), hormon=0)) -
+     predict(fit@lm, data.frame(rectime=1000*exp(-eps), hormon=0)))/2/eps/1000
+predict(fit, newdata=nd, type="haz")
+plot(fit,type="haz", newdata=data.frame(hormon=0))
+
+## biostat3: coxphHaz and coxphHazList 
+as.data.frame.coxphHaz = function(x, row.names=NULL, optional = FALSE, ...) {
+    newdata = attr(x,"newdata")
+    ## To avoid "row names were found from a short variable and have been discarded":
+    rownames(newdata) = NULL 
+    data.frame(newdata, x=x$x, y=x$y)
+}
+as.data.frame.coxphHazList = function(x, row.names=NULL, optional = FALSE, ...) {
+    do.call(rbind, lapply(x, as.data.frame))
+}
+fit <- coxph(Surv(surv_mm/12,status=="Dead: cancer")~agegrp, data=colon)
+newdata <- data.frame(agegrp=levels(colon$agegrp))
+haz <- suppressWarnings(coxphHaz(fit,newdata))
+library(ggplot2)
+head(as.data.frame(haz))
+ggplot(as.data.frame(haz), aes(x=x,y=y,ymin=y.lower,ymax=y.upper,col=agegrp,fill=agegrp)) +
+    geom_ribbon(alpha=0.5) + geom_line(col="black") # + facet_grid(~agegrp)
+
+
+
+## Constrained MLE
+
+
+
+## relative survival and LEL
+library(rstpm2)
+library(biostat3)
+head(melanoma)
+head(popmort)
+merged = merge(transform(melanoma, ye = floor(yexit), se=ifelse(sex=="Male",1,2), event=status != "Alive"),
+               popmort, by.x=c("age","ye","se"), by.y=c("_age","_year","sex"), all.x=TRUE) 
+merged = subset(merged, sex="Female")
+## sum(is.na(merged$rate))
+model1 = stpm2(Surv(surv_mm,event)~bhazard(rate),data=merged,df=3) # only intercept - was buggy
+## model2 = stpm2(Surv(surv_mm,event)~age+bhazard(rate)+cluster(age),data=merged,df=3)
+## model1 = stpm2(Surv(surv_mm,event)~1,data=merged,df=3,bhazard=merged$rate)
+
+## mean(subset(merged,event)$yexit)
+## We need event counts and person-time in the popmort data-frame
+library(dplyr)
+temp = cbind(filter(popmort,sex==1) %>% mutate(males=rate,rate=NULL,sex=NULL),
+             data.frame(females=filter(popmort,sex==2)$rate))
+plot(males~females,temp,log="xy")
+abline(0,1,col=2)
+
+##
+d = data.frame(y=c(1000,2000),sex=0:1,pt=1e5) # some data
+fit = glm(y~sex+offset(log(pt)),data=d, family=poisson) # Poisson regression
+pred = predict(fit,newdata=transform(d,pt=1),type="link",se.fit=TRUE)
+with(pred,
+     exp(data.frame(Estimate=fit,Lower=fit-1.96*se.fit,Upper=fit+1-96*se.fit)))
+library(rstpm2)
+exp(confint(predictnl(fit,predict,newdata=transform(d,pt=1),type="response")))
+
+set.seed(12345)
+n = 1000
+x = factor(rbinom(n,1,0.5))
+y = rnorm(n, x==1)
+fit = lm(y~x)
+predict(fit, newdata=data.frame(x=0)) # fails
+predict(fit, newdata=data.frame(x=1)) # fails
+predict(fit, newdata=data.frame(x=factor(0:1))) # okay
+predict(fit, newdata=data.frame(x=factor(0,0:1))) # okay
+
+##
+library(expm)
+##
+K = 2
+Z = c(1,0,0)
+Y = c(1000,2000); N = 1e4; Sigma=diag(Y/N^2)
+lambda=Y/N
+##
+alpha=cbind(c(-sum(lambda),lambda),matrix(0,K+1,K))
+expm(alpha*10) # ok
+##
+Z = c(1,rep(0,(1+2)*3-1))
+alpha=cbind(c(-sum(lambda),lambda,-1,-1,1,0,0,1),matrix(0,length(Z),length(Z)-1))
+expm(alpha)
+m=matrix(expm(alpha)[4:9,1],2,3)
+t(m) %*% Sigma %*% m # includes covariance terms
+expm(alpha*10)
+m=matrix(expm(alpha*10)[4:9,1],2,3)
+sqrt(diag(t(m) %*% Sigma %*% m)) # includes covariance terms
+
+
+## This approach works!
+## We can add further differential equations for the covariance matrix for P (for a time-dependent covariance matrix for the parameters)
+library(deSolve)
+func <- function(t, y, parms, ...) {
+    ## browser()
+    index = findInterval(t,parms$t)
+    lambda = parms$lambda[index,] # length=K
+    K = length(lambda)
+    q = rbind(c(-sum(lambda),lambda),matrix(0,K,K+1)) # length=K+1
+    Qm = lapply(1:K,function(k) {
+        m = matrix(0,K+1,K+1)
+        m[1,1] = -1
+        m[1,k+1] = 1
+        m
+    })
+    Sigma = parms$Sigma[[index]] # dim=K^2
+    P = y[1:(K+1)] # K+1 rowvec
+    Pm = matrix(y[(2+K):(1+K+K*(K+1))],K+1,K) # (K+1)*K
+    dPdt = P %*% q
+    dPmdt = sapply(1:K, function(k) Pm[,k] %*% q + P %*% Qm[[k]]) # (K+1)*K
+    dphidt = dPmdt %*% (Sigma %*% t(Pm)) + Pm %*% (Sigma %*% t(dPmdt)) # (K+1)^2
+    list(c(dPdt, dPmdt, dphidt)) # length=1+K+(K+1)*K+(K+1)^2
+}
+Y = c(1000,2000); N = 1e4; Sigma=diag(Y/N^2); K=2
+lambda = Y/N
+y = c(1,rep(0,K+K*(K+1)+(K+1)^2))
+parms = list(t=c(0,Inf), lambda=rbind(lambda), Sigma=list(Sigma))
+ode1 = ode(y,seq(0,10),func,parms)
+ode1[11,2:4]
+sqrt(diag(matrix(ode1[11,11:19],3,3)))
+ode1
+
+## Using markov_msm (with an *identity* link for comparability)
+fit1=glm(rate~1, data=data.frame(rate=0.1,N=1e4), family=poisson(link="identity"), weight=N)
+fit2=glm(rate~1, data=data.frame(rate=0.2,N=1e4), family=poisson(link="identity"), weight=N)
+test=markov_msm(list(fit1,fit2),
+                trans=matrix(c(NA,1,2,NA,NA,NA,NA,NA,NA),3,3,TRUE), t=0:10, newdata=data.frame(N=1),
+                tmvar="t")
+print(test,se=TRUE)
+test$Pu
+
+## fit1=glm(rate~factor(findInterval(t,0:2))-1, data=data.frame(t=0:2,rate=c(0.1,0.2,0.3),N=1e4), family=poisson(link="identity"), weight=N)
+
+fit1=glm(Y~offset(log(N)), data=data.frame(Y=1000,N=1e4), family=poisson)
+fit2=glm(Y~offset(log(N)), data=data.frame(Y=2000,N=1e4), family=poisson)
+test=markov_msm(list(fit1,fit2),
+                trans=matrix(c(NA,1,2,NA,NA,NA,NA,NA,NA),3,3,TRUE), t=0:10, newdata=data.frame(N=1),
+                tmvar="t")
+print(test,se=TRUE)
+
+
+## Inquiry
+library(survival)
+library(rstpm2)
+m <- rstpm2::stpm2(Surv(time, status) ~ sex, data = lung)
+plot(m, newdata=data.frame(sex=2))
+predict(m, newdata = data.frame(sex = 2, time = 100), type = "rmst", se.fit=TRUE)
+## plot(m, newdata=data.frame(sex=2), type="rmst") # fails
+## predict(m, newdata = data.frame(sex = 1:2, time = 100), type = "rmst", se.fit=TRUE) # fails
+
+## Inquiry
+## Cross-validation with bias correction (Davison and Hinkley, 1997, p. 295)
+crossValidation = function(object,data,prediction,K = 10,correction=TRUE) {
+    N = nrow(data)
+    ndex = 1:N
+    part = as.factor(sample(1:K, N, replace = TRUE))
+    folds = split(ndex, part)
+    p = sapply(folds, length)/N
+    sum(sapply(1:K, function(k) {
+        training = data[unlist(folds[-k]), ]
+        validation = data[folds[[k]], ]
+        objectStar = update(object,data=training)
+        prediction(objectStar,validation) - p[k]*prediction(objectStar,data)*correction
+    })) + prediction(object,data)*correction
+}
+library(rstpm2)
+setMethod("update", "stpm2", function(object, ...) { # I have added this to rstpm2 on GitHub
+    object@call = object@Call
+    update.default(object, ...)
+})
+fit = gsm(Surv(rectime,censrec==1)~hormon+x1+x2+x3,data=brcancer,df=3)
+set.seed(420)
+## Currently, there is no simpler way to predict out-of-sample -2*log-likelihood for an stpm2 model
+predictDeviance = function(eventVar) function(object,newdata) {
+    events = newdata[[eventVar]]>0
+    -2*(sum(predict(object,newdata=newdata[events,,drop=FALSE],
+                    type="loghazard"))-
+        sum(predict(object,newdata=newdata,type="cumhaz")))
+}
+crossValidation(fit, brcancer,predictDeviance("censrec"))
+set.seed(420)
+crossValidation(fit, brcancer,predictDeviance("censrec"),correction=FALSE)
+AIC(fit)
+BIC(fit)
+
 library(rstpm2)
 library(survival)
 library(timereg)
@@ -33,14 +319,83 @@ two_states <- function(model, ...) {
 }
 ## Note: the first argument is the hazard model. The other arguments are arguments to the
 ## markov_msm function, except for the transition matrix, which is defined by the new function.
+colon2 <- transform(survival::colon, Obs=(rx=="Obs")+0, Lev=(rx=="Lev")+0,Lev_5FU=(rx=="Lev+5FU")+0)
+death = aalen(Surv(time,status)~Lev+Lev_5FU, data=subset(colon2,etype==2))
+cr = two_states(death, newdata=data.frame(Lev=0,Lev_5FU=0))
+plot(cr,ggplot=TRUE,stacked=FALSE,which="L") # ok
+plot(cr,ggplot=TRUE,which="L") # ok - is this sensible?
+plot(cr) # ok -- no legend
+plot(cr,ggplot=TRUE) # ok
+plot(cr,lattice=TRUE) # ok -- no legend
+plot(cr,ggplot=TRUE,stacked=FALSE) # ok
+##
+competing_risks <- function(models, ...) {
+    transmat = matrix(c(NA,1,2,
+                        NA,NA,NA,
+                        NA,NA,NA),3,3,byrow=TRUE)
+    rownames(transmat) <- colnames(transmat) <- c("Initial","Event 1","Event 2")
+    markov_sde(models, ..., trans = transmat)
+}
+## Note: the first argument is the hazard model. The other arguments are arguments to the
+## markov_msm function, except for the transition matrix, which is defined by the new function.
+colon2 <- transform(survival::colon, Obs=(rx=="Obs")+0, Lev=(rx=="Lev")+0,Lev_5FU=(rx=="Lev+5FU")+0)
+progression = aalen(Surv(time,status)~Lev+Lev_5FU, data=subset(colon2,etype==1))
+death = aalen(Surv(time,status)~Lev+Lev_5FU, data=subset(colon2,etype==2))
+cr = competing_risks(list(progression,death), newdata=data.frame(Lev=0,Lev_5FU=0))
+plot(cr)
+##
+illness_death <- function(models, ...) {
+    transmat = matrix(c(NA,1,2,
+                        NA,NA,3,
+                        NA,NA,NA),3,3,byrow=TRUE)
+    rownames(transmat) <- colnames(transmat) <- c("Initial","Illness","Death")
+    markov_sde(models, ..., trans = transmat)
+}
+## Note: the first argument is the hazard model. The other arguments are arguments to the
+## markov_msm function, except for the transition matrix, which is defined by the new function.
 colon2 <- transform(survival::colon, Obs=(rx=="Obs"), Lev=(rx=="Lev"),Lev_5FU=(rx=="Lev+5FU"))
-death = aalen(Surv(time,status)~Obs, data=subset(colon2,etype==2))
-## cr = two_states(death, newdata=data.frame(rx="Obs")) # fails
-## cr = two_states(death, newdata=data.frame(rx=levels(survival::colon$rx)))
-
-death = aalen(Surv(time,status)~factor(rx), data=subset(survival::colon,etype==2))
-cr = two_states(death, newdata=data.frame(rx=factor("Obs",levels(survival::colon$rx)))) # fails
-
+d1 = subset(colon2,etype==1)
+d2 = subset(colon2,etype==2)
+index = d1$time < d2$time & d1$status==1 # index for initial -> recurrence
+d12 = d1 # initial -> recurrence
+d23 = transform(d2[index,], enter=d1$time[index]) # recurrence -> death
+d13 = transform(d2, # initial -> death
+                time=pmin(d1$time,d2$time),
+                status=ifelse(d1$time==d2$time,d2$status,0))
+progression = aalen(Surv(time,status)~Lev+Lev_5FU, data=d12)
+death1 = aalen(Surv(time,status)~Lev+Lev_5FU, data=d13)
+death2 = aalen(Surv(enter,time,status)~Lev+Lev_5FU, data=d23)
+cr = illness_death(list(progression,death1,death2), newdata=data.frame(Lev=FALSE,Lev_5FU=FALSE)) # fails
+plot(cr)
+##
+illness_death = function(models, ...) {
+    transmat = matrix(c(NA,1,2,NA,
+                        NA,NA,NA,3,
+                        NA,NA,NA,NA,
+                        NA,NA,NA,NA),4,4,byrow=TRUE)
+    rownames(transmat) <- colnames(transmat) <- c("Initial","Illness","DirectDeath","DeathAfterRecurrence")
+    markov_sde(models, ..., trans = transmat)
+}
+## Note: the first argument is the hazard model. The other arguments are arguments to the
+## markov_msm function, except for the transition matrix, which is defined by the new function.
+colon2 = transform(survival::colon, Obs=(rx=="Obs")+0, Lev=(rx=="Lev")+0, Lev_5FU=(rx=="Lev+5FU")+0)
+d1 = subset(colon2,etype==1)
+d2 = subset(colon2,etype==2)
+index = d1$time < d2$time & d1$status==1 # index for initial -> recurrence
+d12 = d1 # initial -> recurrence
+d23 = transform(d2[index,], enter=d1$time[index]) # recurrence -> death
+d13 = transform(d2, # initial -> death
+                time=pmin(d1$time,d2$time),
+                status=ifelse(d1$time==d2$time,d2$status,0))
+progression = aalen(Surv(time,status)~Lev+Lev_5FU, data=d12)
+death1 = aalen(Surv(time,status)~Lev+Lev_5FU, data=d13)
+death2 = aalen(Surv(enter,time,status)~Lev+Lev_5FU, data=d23)
+cr = illness_death(list(progression,death1,death2), newdata=data.frame(Lev=0,Lev_5FU=0:1),
+                   weights=c(-1,1), los=FALSE)
+plot(cr,ggplot=TRUE) + facet_grid(~Lev_5FU) # ok
+plot(cr,ggplot=TRUE,stacked=FALSE) + facet_grid(state~Lev_5FU) # ok
+plot(cr,ggplot=TRUE,stacked=FALSE,which="L") + facet_grid(state~Lev_5FU) # ok
+plot(standardise(cr),stacked=FALSE,ggplot=TRUE) # CIs are *very* wide -- error?
 
 ## Non-parametric baseline: SDE approach due to Ryalen and colleagues
 markov_sde <- function(models, trans, newdata, init=NULL, nLebesgue=1e4+1, los=FALSE, nOut=300,
