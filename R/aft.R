@@ -245,7 +245,7 @@ aft <- function(formula, data, smooth.formula = NULL, df = 3,
                 control = list(parscale = 1, maxit = 1000), init = NULL,
                 weights = NULL,
                 timeVar = "", time0Var = "", log.time.transform=TRUE,
-                reltol=1.0e-8, trace = 0,
+                reltol=1.0e-8, trace = 0, cure = FALSE,
                 contrasts = NULL, subset = NULL, use.gr = TRUE, ...) {
     ## parse the event expression
     eventInstance <- eval(lhs(formula),envir=data)
@@ -296,16 +296,12 @@ aft <- function(formula, data, smooth.formula = NULL, df = 3,
     ##
     ## get variables
     time <- eval(timeExpr, data, parent.frame())
-    if (any(time>0 & time<1e-4))
-        warning("Some event times < 1e-4: consider transforming time to avoid problems with finite differences")
     time0Expr <- NULL # initialise
     if (delayed) {
       time0Expr <- lhs(formula)[[2]]
       if (time0Var == "")
         time0Var <- all.vars(time0Expr)
       time0 <- eval(time0Expr, data, parent.frame())
-      if (any(time0>0 & time0<1e-4))
-          warning("Some entry times < 1e-4: consider transforming time to avoid problems with finite differences")
     } else {
         time0 <- NULL
     }
@@ -321,18 +317,6 @@ aft <- function(formula, data, smooth.formula = NULL, df = 3,
     y <- model.extract(model.frame(coxph.obj),"response")
     data$logHhat <- pmax(-18,log(-log(S0hat(coxph.obj))))
     ##
-    ## Weibull regression
-    if (delayed) {
-        if (requireNamespace("eha", quietly = TRUE)) {
-            survreg1 <- eha::aftreg(formula, data)
-            coef1 <- coef(survreg1)
-            coef1 <- coef1[1:(length(coef1)-2)]
-        } else coef1 <- rep(0,ncol(X))
-    } else {
-        survreg1 <- survival::survreg(formula, data)
-        coef1 <- coef(survreg1)
-        coef1 <- coef1[-1] # assumes intercept included in the formula; ignores smooth.formula
-    }
     ## pred1 <- predict(survreg1)
     data$logtstar <- log(time)    
     ## data$logtstar <- log(time/pred1)    
@@ -350,13 +334,14 @@ aft <- function(formula, data, smooth.formula = NULL, df = 3,
     ## if (is.null(init)) {
     ##   init <- coef(lm.obj)
     ## }
-    lm0.obj <- lm(logHhat~nsx(logtstar,df,intercept=TRUE)-1,dataEvents)
-    ## lm0D.obj <- lm(logHhat~nsxD(logtstar,df,intercept=TRUE)-1,dataEvents)
+    lm0.obj <- if (cure) lm(logHhat~nsx(logtstar,df,intercept=TRUE,cure=cure)-1,dataEvents)
+               else lm(logHhat~nsx(logtstar,df,intercept=TRUE)-1,dataEvents)
+    ## lm0D.obj <- lm(logHhat~nsxD(logtstar,df,intercept=TRUE,cure=cure)-1,dataEvents)
     coef0 <- coef(lm0.obj) # log-log baseline
     ## design information for baseline survival
-    design <- nsx(dataEvents$logtstar, df=df, intercept=TRUE)
-    designD <- nsxD(dataEvents$logtstar, df=df, intercept=TRUE)
-    designDD <- nsxDD(dataEvents$logtstar, df=df, intercept=TRUE)
+    design <- nsx(dataEvents$logtstar, df=df, intercept=TRUE, cure=cure)
+    designD <- nsxD(dataEvents$logtstar, df=df, intercept=TRUE, cure=cure)
+    designDD <- nsxDD(dataEvents$logtstar, df=df, intercept=TRUE, cure=cure)
     ##
     ## set up mf and wt
     mt <- terms(lm.obj)
@@ -398,6 +383,18 @@ aft <- function(formula, data, smooth.formula = NULL, df = 3,
         XD0 <- matrix(XD0,nrow=nrow(X0))
         rm(data0)
     }
+    ## Weibull regression
+    if (delayed) {
+        if (requireNamespace("eha", quietly = TRUE)) {
+            survreg1 <- eha::aftreg(formula, data)
+            coef1 <- coef(survreg1)
+            coef1 <- coef1[1:(length(coef1)-2)]
+        } else coef1 <- rep(0,ncol(X))
+    } else {
+        survreg1 <- survival::survreg(formula, data)
+        coef1 <- coef(survreg1)
+        coef1 <- coef1[-1] # assumes intercept included in the formula; ignores smooth.formula
+    }
     if (ncol(X)>length(coef1)) {
         coef1 <- c(coef1,rep(0,ncol(X) - length(coef1)))
         names(coef1) <- names(coef1b)
@@ -421,7 +418,7 @@ aft <- function(formula, data, smooth.formula = NULL, df = 3,
                  trace = as.integer(trace), map0 = map0 - 1L, ind0 = ind0, which0 = which0 - 1L,
                  boundaryKnots=attr(design,"Boundary.knots"), q.const=t(attr(design,"q.const")),
                  interiorKnots=attr(design,"knots"), design=design, designD=designD,
-                 designDD=designDD,
+                 designDD=designDD, cure=as.integer(cure),
                  data=data, lm.obj = lm.obj, return_type="optim")
     negll <- function(beta) {
         localargs <- args

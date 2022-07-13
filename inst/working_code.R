@@ -18,6 +18,43 @@
 ##   require(bbmle)
 ## }
 
+##
+library(rstpm2)
+m <- rstpm2::stpm2(Surv(time, status) ~ sex, data = lung)
+predict(m, newdata = data.frame(sex = c(1,1), time = c(100,200)), type = "rmst", se.fit=TRUE) # ok
+plot(m, newdata = data.frame(sex = 1), type="rmst")
+plot(m, newdata = data.frame(sex = 1), var="sex", type="rmstdiff")
+
+
+## Predictions for differences
+## Can we return the predictions, gradients and covariance matrix and use those for differences?
+## preddiff = pred1 - pred0
+## graddiff = grad1 - grad0
+## vardiff = graddiff^T Sigma graddiff
+## Note that we can silently return attributes
+d = structure(data.frame(a=1), attr1=1:100, class=c("Test","data.frame"))
+print(d) # print.Test() does not exist, so this uses print.data.frame()
+## What about gradients on transformed scales,
+## with a transformation g and an inverse transformation G?
+## var(eta1) = grad_eta1^T Sigma grad_eta1
+## and pred1 = G(eta1)
+## => var(pred1) = var(G(eta1)) = grad(G(eta1))^T Sigma grad(G(eta1))
+## where grad1 = grad(G(eta1)) = G'(eta1) grad_eta1?? (chain rule)
+## preddiff = pred1 - pred0
+## graddiff = grad1 - grad0
+## vardiff = graddiff^T Sigma graddiff
+
+
+
+## add cure for the AFT models
+library(rstpm2)
+fit0 = aft(Surv(rectime,censrec==1)~hormon,data=brcancer,df=4)
+fit = aft(Surv(rectime,censrec==1)~hormon,data=brcancer,df=4,cure=TRUE)
+par(mfrow=1:2)
+plot(fit0,newdata=data.frame(hormon=0),main="Without cure")
+plot(fit,newdata=data.frame(hormon=0),main="With cure")
+cov2cor(vcov(fit0))
+
 ## cure models paper
 library(cuRe)
 colonDC <- subset(cuRe::colonDC, stage %in% c("Regional","Distant"))
@@ -36,6 +73,7 @@ fit.lat.timevar2 <- stpm2(Surv(FUyear, status) ~ stageDistant + bhazard(bhaz),
 
 predict(fit.lat, newdata = data.frame(FUyear = 0, stageDistant = 0), type = "probcure", se.fit = TRUE)
 predict(fit.lat, newdata = data.frame(FUyear = 2, stageDistant = 0), type = "uncured", se.fit = TRUE)
+predict(fit.lat.timevar, newdata = data.frame(FUyear = 2, stageDistant = 0), type = "probcure", se.fit = TRUE)
 
 plot(fit.lat, newdata = data.frame(stageDistant = 0), type = "probcure") 
 plot(fit.lat, newdata = data.frame(stageDistant = 0), type = "surv") 
@@ -91,6 +129,27 @@ C = B %*% x
 theta = rnorm(3)
 plot(xs, N %*% theta + C, type="l")
 ## How to predict outside of the boundaries?
+
+## test for smoothpwc
+library(rstpm2)
+library(dplyr)
+relative_survival <- function(model1, smoothpwc, ...) {
+    transmat = matrix(c(NA,1,2,
+                        NA,NA,NA,
+                        NA,NA,NA),3,3,byrow=TRUE)
+    rownames(transmat) <- colnames(transmat) <- c("Initial","Cause-specific death","Other causes of death")
+    rstpm2::markov_msm(list(model1,smoothpwc), ..., trans = transmat)
+}
+## use popmort
+colon2 = inner_join(survival::colon |> filter(etype==2),
+                    mutate(popmort,sex=2-sex,rate) |> filter(year==2000), by=c("age","sex")) |>
+    mutate(t=time/365.25)
+excess = gsm(Surv(t,status)~factor(rx)+bhazard(rate), data=colon2, df=3)
+smoothpwc1 = with(filter(popmort,sex==1 & year==2000),smoothpwc(age+0.5-70,rate)) # example is for men aged 70 years
+rs = relative_survival(excess, smoothpwc1, newdata=data.frame(rx="Obs"), t = seq(0,7, length=301))
+plot(rs,ggplot=TRUE)
+
+
 
 
 ## Spline interpolation
