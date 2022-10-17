@@ -18,6 +18,189 @@
 ##   require(bbmle)
 ## }
 
+## Email for episig
+## install.packages("extRemes")
+library(extRemes)
+library(survival)
+set.seed(12345)
+n<-500000
+x1<-rnorm(n)
+x2<-rnorm(n)
+error<-revd(n, loc = 0, scale = 1)
+b0<- 1
+b1<-0.5
+b2<--1.2
+c<-1
+time<-exp(b0+b1*x1+b2*x2-c*error)
+status<-rep(1,n)
+survreg(Surv(time, status==1) ~ x1+x2,dist="exponential")
+
+
+library(rstpm2)
+object <- stpm2(Surv(rectime,censrec==1)~hormon,data=brcancer,df=3,tvc=list(hormon=2))
+newdata = data.frame(hormon=0)
+simulate(object, newdata=newdata) # currently returns just the times -- this will later return a data-frame
+simulate(object, newdata=newdata, start=1500) # left-truncation
+plot(object, newdata=newdata)
+
+grep_call = function(name,x) {
+    local_function = function(x)
+        if(length(x)==1) x==name else any(sapply(x, local_function))
+    which(sapply(x, local_function))
+}
+gsm_design = function(object, newdata, inflate=100) {
+    stopifnot(inherits(object, "stpm2"),
+              is.list(newdata),
+              is.numeric(inflate),
+              length(inflate) == 1)
+    ## Assumed patterns:
+    ## timeEffect := (ns|nsx)(log(timeVar),knots,Boundary.knots,centre=FALSE,derivs=(c(2,2)|c(2,1)))
+    ## effect := timeEffect | otherEffect:timeEffect | timeEffect:otherEffect
+    terms = attr(object@model.frame, "terms")
+    factors = attr(terms, "factors")[-1,,drop=FALSE]
+    variables = attr(terms, "variables")[-(1:2)]
+    predvars = attr(terms, "predvars")[-(1:2)]
+    indices = grep_call(object@timeVar, variables)
+    if(length(indices)==0) stop("No timeVar in the formula -- unexpected error")
+    index_time_variables = grep_call(object@timeVar, variables) # time variables
+    index_time_effects = grep(object@timeVar,colnames(factors)) # components in the rhs with time variables
+    ## I want to know how wide is each term
+    nms = names(coef(object))
+    term.labels = attr(terms, "term.labels")
+    coef_index <-
+        sapply(strsplit(nms, ":"), function(c) {
+            if (length(c)>2)
+                stop("current implementation only allows for main effects and two-way interactions")
+            pmatchp = function(x, table)
+                !is.na(pmatch(x, table))
+            if(length(c)==1) {
+                for (i in seq_along(term.labels)) {
+                    t = term.labels[i]
+                    ## browser()
+                    if (pmatchp(t,c))
+                        return(i)
+                }
+                if (c == "(Intercept)")
+                    return(0)
+                return(-1)
+            }
+            ## => length(c) == 2
+            term.labels.split = strsplit(term.labels, ":")
+            for (i in seq_along(term.labels)) {
+                t = term.labels.split[[i]]
+                if (all(pmatchp(t,c)))
+                    return(i)
+            }
+            return(-1)
+        })
+    ## how to map from term.labels to factors to predvars?
+    ## Can I replace each term with its predvars?
+    parse_ns = function(mycall,x,index_time_effect) {
+        df = length(c(mycall$knots, mycall$Boundary.knots)) - 1
+        stopifnot(mycall[[1]] == quote(nsx) || mycall[[1]] == quote(ns),
+                  length(mycall[[2]])>1,
+                  mycall[[2]][[1]] == quote(log), # assumes log
+                  mycall[[2]][[2]] == object@timeVar, # what about a scalar product or divisor?
+                  is.null(mycall$deriv) || (mycall$derivs[1] == 2 && mycall$derivs[2] %in% 1:2),
+                  mycall$centre == FALSE) # doesn't allow for centering
+        cure = !is.null(mycall$derives) && all(mycall$derivs == c(2,1))
+        time = object@args$time
+        q_const = attr(nsx(log(mean(time)), knots=mycall$knots,
+                           Boundary.knots=mycall$Boundary.knots,
+                           intercept=mycall$intercept),
+                       "q.const")
+        ## browser()
+        list(call = mycall,
+             knots=mycall$knots,
+             Boundary_knots=mycall$Boundary.knots,
+             intercept=as.integer(mycall$intercept),
+             gamma=coef(object)[which(coef_index %in% index_time_effect)],
+             q_const = q_const,
+             cure = as.integer(cure),
+             x=x)
+    }
+    time = object@args$time
+    newdata[[object@timeVar]] = mean(time) # NB: time not used
+    Xp = predict(object, newdata=newdata, type="lpmatrix")
+    index2 = which(coef_index %in% index_time_effects)
+    etap = drop(Xp[, index2, drop=FALSE] %*% coef(object)[index2])
+    list(type="gsm",
+         link_name=object@args$link,
+         tmin = min(time), # not currently used?
+         tmax = max(time),
+         inflate=as.double(inflate),
+         etap=etap,
+         log_time=TRUE,
+         terms =
+             lapply(index_time_effects,
+                    function(i) {
+                        j = which(factors[,i] != 0)
+                        if (length(j)==1)
+                            return(parse_ns(predvars[[j]], rep(1, nrow(newdata)), i))
+                        else {
+                            if(length(j)>3)
+                                stop("Current implementation only allows for two-way interaction terms")
+                            if (j[1] %in% index_time_variables)
+                                return(parse_ns(predvars[[j[1]]], eval(predvars[[j[2]]], newdata), i))
+                            else return(parse_ns(predvars[[j[2]]], eval(predvars[[j[1]]], newdata), i))
+                        }
+                    })
+         )
+}
+
+library(rstpm2)
+library(microsimulation)
+object <- gsm(Surv(rectime,censrec==1)~hormon,data=brcancer,df=3,tvc=list(hormon=2))
+newdata = data.frame(hormon=0:1)
+inflate = 100
+(design <- gsm_design(object,newdata))
+replicate(10,.Call("test_read_gsm", design, PACKAGE="microsimulation"))
+
+
+set.seed(1002)
+simulate(fit1, nsim=10, newdata=nd)
+simulate(fit1, newdata=data.frame(hormon=0:1))
+set.seed(1002)
+replicate(10,.Call("test_read_gsm", design, PACKAGE="rstpm2"))
+set.seed(1002)
+range(replicate(10,.Call("test_read_gsm", gsm_design(fit1,nd), PACKAGE="rstpm2")) -
+      simulate(fit1, nsim=10, seed=1002, newdata=nd))
+library(microsimulation)
+set.seed(1002)
+replicate(10,.Call("test_read_gsm", gsm_design(fit1,nd), PACKAGE="microsimulation"))
+
+simulate.stpm2 <- function(object, nsim=1, seed=NULL,
+                           newdata=NULL, lower=1e-6, upper=1e5, ...) {
+    stopifnot(!is.null(newdata))
+    if (!is.null(seed)) set.seed(seed)
+    ## assumes nsim replicates per row in newdata
+    n = nsim * nrow(newdata)
+    newdata = newdata[rep(1:nrow(newdata), each=nsim), , drop=FALSE]
+    e <- rexp(n)
+    objective <- function(time) {
+        newdata[[object@timeVar]] <- time
+        predict(object, type="cumhaz", newdata=newdata) - e
+    }
+    vuniroot(objective, lower=rep(lower,length=n), upper=rep(upper,length=n))$root
+}
+setMethod("simulate", "stpm2", simulate.stpm2)
+setMethod("simulate", "pstpm2", simulate.stpm2)
+
+
+
+## Can we estimate the hessian externally?
+library(rstpm2)
+library(numDeriv)
+fit = stpm2(Surv(rectime,censrec==1)~hormon,data=brcancer,df=4)
+summary(fit)
+fit@vcov = solve(numDeriv::hessian(fit@minuslogl, coef(fit)))
+summary(fit)
+## Can we also use the gradient?
+(solve(numDeriv::jacobian(fit@args$gradnegll, coef(fit))) - solve(numDeriv::hessian(fit@minuslogl, coef(fit)))) |> range()
+(solve(numDeriv::jacobian(fit@args$gradnegll, coef(fit))) - vcov(fit)) |> range()
+
+## Can we improve on accuracy using nsxD? This would also include predictions using C++ code.
+
 ##
 library(rstpm2)
 m <- rstpm2::stpm2(Surv(time, status) ~ sex, data = lung)
