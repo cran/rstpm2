@@ -621,9 +621,9 @@ aft <- function(formula, data, smooth.formula = NULL, df = 3,
                 else bbmle::mle2(negll, coef, vecpar=TRUE, control=control, ..., eval.only=TRUE)
         ## browser()
         mle2@details$convergence <- fit$fail # fit$itrmcd
-        vcov <- try(solve(hessian), silent=TRUE)
+        vcov <- try(solve(hessian,tol=0), silent=TRUE)
         if (inherits(vcov, "try-error"))
-            vcov <- try(solve(hessian+1e-6*diag(nrow(hessian))), silent=TRUE)
+            vcov <- try(solve(hessian+1e-6*diag(nrow(hessian)), tol=0), silent=TRUE)
         if (inherits(vcov, "try-error")) {
             if (!use.gr)
                 message("Non-invertible Hessian")
@@ -640,8 +640,12 @@ aft <- function(formula, data, smooth.formula = NULL, df = 3,
     }
     out <- as(mle2, "aft")
     out@args <- args
+    attr(out,"nobs") <- length(out@args$event) # for logLik method
     return(out)
   }
+
+setMethod("nobs", "aft", function(object, ...) length(object@args$event))
+
 
 setMethod("predict", "aft",
           function(object,newdata=NULL,

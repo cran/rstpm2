@@ -1364,7 +1364,7 @@ gsm <- function(formula, data, smooth.formula = NULL, smooth.args = NULL,
                                      gr=gradnegll, ..., eval.only=TRUE)
             else mle2(negll, coef, vecpar=TRUE, control=control$mle2.control, ..., eval.only=TRUE)
     mle2@details$convergence <- if (penalised) 0 else fit$fail # fit$itrmcd
-    if (inherits(vcov <- try(solve(hessian)), "try-error")) {
+    if (inherits(vcov <- try(solve(hessian,tol=0)), "try-error")) {
         if (control$optimiser=="NelderMead") {
             warning("Non-invertible Hessian")
             mle2@vcov <- matrix(NA,length(coef), length(coef))
@@ -1378,9 +1378,9 @@ gsm <- function(formula, data, smooth.formula = NULL, smooth.args = NULL,
             hessian <- fit$hessian
             names(coef) <- rownames(hessian) <- colnames(hessian) <- names(init)
             mle2 <- mle2(negll, coef, vecpar=TRUE, control=control, ..., eval.only=TRUE)
-            mle2@vcov <- if (!inherits(vcov <- try(solve(hessian)), "try-error")) vcov else matrix(NA,length(coef), length(coef))
+            mle2@vcov <- if (!inherits(vcov <- try(solve(hessian,tol=0)), "try-error")) vcov else matrix(NA,length(coef), length(coef))
             mle2@details$convergence <- fit$fail # fit$itrmcd
-            if (inherits(vcov <- try(solve(hessian)), "try-error"))
+            if (inherits(vcov <- try(solve(hessian,tol=0)), "try-error"))
                 warning("Non-invertible Hessian - refitting failed")
         }
     } else {
@@ -1432,7 +1432,7 @@ gsm <- function(formula, data, smooth.formula = NULL, smooth.args = NULL,
                    args=args)
         if (robust && !frailty) {
             ## Bread matrix
-            bread.mat <- solve(fit$hessian)
+            bread.mat <- solve(fit$hessian,tol=0)
             ## Meat matirx calculated with individual penalized score functions
             beta.est <- fit$coef
             sp.opt <- fit$sp
@@ -1834,7 +1834,7 @@ predict.stpm2.base <-
         logtheta <- beta[npar]
         theta <- exp(beta[npar])
         beta <- beta[-npar]
-        Hessian <- solve(vcov(object))
+        Hessian <- solve(vcov(object),tol=0)
         eta <- as.vector(X %*% beta)
         eta2 <- as.vector(X2 %*% beta)
         S <- newlink$ilink(eta)
@@ -1877,7 +1877,7 @@ predict.stpm2.base <-
                                  sum(dmarg.dlogtheta(logtheta,H2[index]))/n.cluster))
             par.hessian <- cbind(matrix(0, nrow = npar, ncol = 2), -Hessian / n.cluster)
             bread <- rbind(S.hessian, par.hessian)
-            ibread <- solve(bread)
+            ibread <- solve(bread,tol=0)
             sandwich <- (ibread %*% meat %*% t(ibread) / n.cluster)[1:2, 1:2]
             gradient <- switch(type,
                                af=as.matrix(c( - (1 - meanS2[i]) / (1 - meanS[i]) ^ 2, 1 / (1 - meanS[i])), nrow = 2, ncol = 1),
@@ -1903,7 +1903,7 @@ predict.stpm2.base <-
         logtheta <- beta[npar]
         theta <- exp(beta[npar])
         beta <- beta[-npar]
-        Hessian <- solve(vcov(object))
+        Hessian <- solve(vcov(object),tol=0)
         eta <- as.vector(X %*% beta)
         S <- newlink$ilink(eta)
         H <- -log(S)
@@ -1928,7 +1928,7 @@ predict.stpm2.base <-
             ## meat <- stats::var(res, na.rm=TRUE) # crossprod(res)/n.cluster
             ## colnames(meat) <- rownames(meat) <- c(names(beta),"logtheta")
             ## bread <- -Hessian / n.cluster
-            ## ibread <- solve(bread)
+            ## ibread <- solve(bread,tol=0)
             ## sandwich <- ibread %*% meat %*% t(ibread) / n.cluster
             ## g <- c(colSums(margS[index]*(-newlink$gradH(eta[index],list(X=X[index,,drop=FALSE]))/(1+theta*H[index])))/n.cluster,
             ##                    sum(dmarg.dlogtheta(logtheta,H[index]))/n.cluster)
@@ -1944,7 +1944,7 @@ predict.stpm2.base <-
                                sum(dmarg.dlogtheta(logtheta,H[index]))/n.cluster)
             par.hessian <- cbind(matrix(0, nrow = npar, ncol = 1), -Hessian / n.cluster)
             bread <- rbind(S.hessian, par.hessian)
-            ibread <- solve(bread)
+            ibread <- solve(bread,tol=0)
             sandwich <- (ibread %*% meat %*% t(ibread) / n.cluster)[1, 1]
             se.fit[i] <- sqrt(sandwich)
         }
@@ -2167,6 +2167,7 @@ predict.stpm2.base <-
                            lower[i]=x[i]-eps
                            (f(upper)-f(lower))/2/eps
                        }))
+          div <- function(mat,v) t(t(mat)/v)
           if (type=="hazard" && link %in% c("I","log")) {
               ## Case: frailty model (assumes baseline hazard for frailty=1)
               betastar <- if(args$frailty || args$copula) beta[-length(beta)] else beta
@@ -2182,19 +2183,20 @@ predict.stpm2.base <-
               gradS <- object@link$gradS(X%*% betastar,X)
               gradh <- object@link$gradh(X %*% betastar,XD %*% betastar,list(X=X,XD=XD))
               gd <- if(link=="I") collapse(gradh*S + gradS*h) else
-                                                                  collapse(gradh*S + h*gradS)/collapse1(h*S)-collapse(gradS)/collapse1(S)
+                                                                  div(collapse(gradh*S + h*gradS),collapse1(h*S))-div(collapse(gradS),collapse1(S))
           }
           if (type=="meanhr" && !object@frailty && link == "log") {
               betastar <- if(args$frailty|| args$copula) beta[-length(beta)] else beta
               h <- as.vector(object@link$h(X %*% betastar, XD %*% betastar))
               S <- as.vector(object@link$ilink(X %*% betastar))
-              gradS <- object@link$gradS(X%*% betastar,X)
+              gradS <- object@link$gradS(X %*% betastar,X)
               gradh <- object@link$gradh(X %*% betastar,XD %*% betastar,list(X=X,XD=XD))
               h2 <- as.vector(object@link$h(X2 %*% betastar, XD2 %*% betastar))
               S2 <- as.vector(object@link$ilink(X2 %*% betastar))
-              gradS2 <- object@link$gradS(X2%*% betastar,X2)
+              gradS2 <- object@link$gradS(X2 %*% betastar,X2)
               gradh2 <- object@link$gradh(X2 %*% betastar,XD2 %*% betastar,list(X=X2,XD=XD2))
-              gd <- collapse(gradh*S + h*gradS)/collapse1(h*S) - collapse(gradS)/collapse1(S) - collapse(gradh2*S2 + h2*gradS2)/collapse1(h2*S2) + collapse(gradS2)/collapse1(S2)
+              gd <- div(collapse(gradh2*S2 + h2*gradS2),collapse1(h2*S2)) - div(collapse(gradS2),collapse1(S2)) - div(collapse(gradh*S + h*gradS),collapse1(h*S)) + div(collapse(gradS),collapse1(S))
+              ## fd(function(beta) {fit=object; fit@fullcoef = beta; log(predict(fit,type="meanhr",newdata=newdata, var=var, exposed=exposed))},betastar)
           }
           if (type=="meansurv" && !object@frailty && link=="I") {
               gd <- collapse(object@link$gradS(X%*% beta,X))
@@ -2304,7 +2306,6 @@ predict.cumhaz <-
     eta <- as.vector(X %*% beta)
     link$H(eta)
 }
-
 
 setMethod("predict", "stpm2",
           function(object,newdata=NULL,
@@ -2622,7 +2623,7 @@ setMethod("summary", "pstpm2",
               ## Wald test for the smoothers
               wald <- t(sapply(names(object@edf_var), function(name) {
                   i <- grep(name,colnames(vcov1),fixed=TRUE)
-                  statistic <- as.vector(coef1[i] %*% solve(vcov1[i,i]) %*% coef1[i])
+                  statistic <- as.vector(coef1[i] %*% solve(vcov1[i,i],tol=0) %*% coef1[i])
                   edf <- object@edf_var[name]
                   c(statistic=statistic,ncoef=length(i),edf=edf,p.value=pchisq(statistic, edf, lower.tail=FALSE))
               }))
@@ -2764,7 +2765,7 @@ simulate.stpm2 <- function(object, nsim=1, seed=NULL,
         newdata[[object@timeVar]] <- time
         predict(object, newdata=newdata)/Sentry - U
     }
-    vuniroot(objective, lower=lower, upper=rep(upper,length=n), tol=1e-10)$root
+    vuniroot(objective, lower=rep(lower,length=n), upper=rep(upper,length=n), tol=1e-10, n=n)$root
 }
 setGeneric("simulate", function(object, nsim=1, seed=NULL, ...) standardGeneric("simulate"))
 setMethod("simulate", signature(object="stpm2"),
