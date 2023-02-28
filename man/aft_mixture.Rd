@@ -1,5 +1,5 @@
-\name{aft}
-\alias{aft}
+\name{aft_mixture}
+\alias{aft_mixture}
 %- Also NEED an '\alias' for EACH other topic documented here.
 \title{
 Parametric accelerated failure time model with smooth time functions
@@ -11,11 +11,12 @@ modelled as exp(-exp(eta_0(log(t*)))), where eta_0(log(t*)) is a linear
 predictor using natural splines.
 }
 \usage{
-aft(formula, data, smooth.formula = NULL, df = 3,
-    tvc = NULL, control = list(parscale = 1, maxit = 1000),
+aft_mixture(formula, data, smooth.formula = NULL, df = 3,
+    tvc = NULL, cure.formula = formula, control = list(parscale = 1, maxit = 1000),
     init = NULL, weights = NULL, timeVar = "", time0Var = "",
     log.time.transform = TRUE,
-    reltol = 1e-08, trace = 0, cure = FALSE, contrasts = NULL, subset = NULL,
+    reltol = 1e-08, trace = 0, cure = FALSE, mixture = FALSE,
+    contrasts = NULL, subset = NULL,
     use.gr = TRUE, ...)
 }
 %- maybe also 'usage' for other objects documented here.
@@ -46,6 +47,10 @@ a list with the names of the time-varying coefficients. This uses natural spline
 (e.g. \code{tvc=list(hormon=3)} is equivalent to
 \code{smooth.formula=~...+hormon:nsx(log(time),df=3)}), which by default
 does \emph{not} include an intercept (or main effect) term. 
+}
+\item{cure.formula}{
+  a rhs formula for the linear predictor for the cure fraction. Defaults
+  to formula. 
 }
   \item{control}{
 \code{control} argument passed to \code{optim}.
@@ -79,7 +84,10 @@ relative tolerance for the model convergence
 integer for whether to provide trace information from the optim procedure
 }
   \item{cure}{
-logical for whether to model for cure (default=FALSE)
+logical for whether to model for non-mixture cure (default=FALSE)
+}
+  \item{mixture}{
+logical for whether to model for mixture cure (default=FALSE)
 }
   \item{contrasts}{
 an optional list. See the \code{contrasts.arg}
@@ -102,7 +110,7 @@ logical indicating whether to use gradients in the calculation
   \code{mle2} class.
 }
 \value{
-An \code{aft-class} object that inherits from \code{mle2-class}. 
+An \code{aft_mixture-class} object that inherits from \code{mle2-class}. 
 }
 %% \references{
 %% %% ~put references to the literature/web site here ~
@@ -120,7 +128,7 @@ Mark Clements.
 \code{\link{survreg}}, \code{\link{coxph}}
 }
 \examples{
-summary(aft(Surv(rectime,censrec==1)~hormon,data=brcancer,df=4))
+summary(aft_mixture(Surv(rectime,censrec==1)~hormon,data=brcancer,df=4))
 }
 % Add one or more standard keywords, see file 'KEYWORDS' in the
 % R documentation directory.

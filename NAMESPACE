@@ -1,8 +1,8 @@
 useDynLib(rstpm2, .registration=TRUE)
 
-exportClasses(stpm2,pstpm2,tvcCoxph,aft)
+exportClasses(stpm2,pstpm2,tvcCoxph,aft,aft_mixture, aft_integrated)
 
-export(stpm2, pstpm2, aft, gsm,
+export(stpm2, pstpm2, aft, gsm, aft_mixture, aft_integrated,
        cox.tvc, # experimental --- don't export?
        markov_msm, ratio_markov_msm,
        zeroModel, hrModel, aftModel, addModel, # stratifiedModel,
@@ -71,7 +71,8 @@ importFrom(stats, quantile, lm, as.formula, coef, makepredictcall, na.fail, pred
            model.matrix, model.weights, na.pass, optimHess, pweibull, 
            terms, terms.formula, .checkMFClasses, .getXlevels, pchisq, printCoefmat,
            anova, var, residuals, confint, qnorm, complete.cases, reformulate,
-           simulate,splinefun, update.default,runif)
+           simulate,splinefun, update.default,runif,
+           aggregate, dgamma, dlogis, dnorm, dweibull, integrate)
 importFrom(mgcv,gam,s)
 importFrom(Rcpp,sourceCpp)
 importFrom(deSolve,ode)

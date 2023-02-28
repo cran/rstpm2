@@ -1,5 +1,5 @@
-\name{aft}
-\alias{aft}
+\name{aft_integrated}
+\alias{aft_integrated}
 %- Also NEED an '\alias' for EACH other topic documented here.
 \title{
 Parametric accelerated failure time model with smooth time functions
@@ -11,11 +11,12 @@ modelled as exp(-exp(eta_0(log(t*)))), where eta_0(log(t*)) is a linear
 predictor using natural splines.
 }
 \usage{
-aft(formula, data, smooth.formula = NULL, df = 3,
-    tvc = NULL, control = list(parscale = 1, maxit = 1000),
-    init = NULL, weights = NULL, timeVar = "", time0Var = "",
+aft_integrated(formula, data, df = 3,
+    tvc = NULL, cure.formula = formula, control = list(parscale = 1, maxit = 1000),
+    init = NULL, weights = NULL, nNodes = 20, timeVar = "", time0Var = "",
     log.time.transform = TRUE,
-    reltol = 1e-08, trace = 0, cure = FALSE, contrasts = NULL, subset = NULL,
+    reltol = 1e-08, trace = 0, cure = FALSE, mixture = FALSE,
+    contrasts = NULL, subset = NULL,
     use.gr = TRUE, ...)
 }
 %- maybe also 'usage' for other objects documented here.
@@ -31,12 +32,6 @@ coefficients. [required]
 a data-frame in which to interpret the variables named in the
 \code{formula} argument. [at present: required]
 }
-  \item{smooth.formula}{
-a formula for describing the time effects for the linear predictor,
-excluding the baseline S_0(t*), but including time-dependent
-acceleration factors. The time-dependent acceleration factors can be
-modelled with any smooth functions.
-}
   \item{df}{
 an integer that describes the degrees of freedom for the \code{ns}
 function for modelling the baseline log-cumulative hazards function (default=3).
@@ -46,6 +41,10 @@ a list with the names of the time-varying coefficients. This uses natural spline
 (e.g. \code{tvc=list(hormon=3)} is equivalent to
 \code{smooth.formula=~...+hormon:nsx(log(time),df=3)}), which by default
 does \emph{not} include an intercept (or main effect) term. 
+}
+\item{cure.formula}{
+  a rhs formula for the linear predictor for the cure fraction. Defaults
+  to formula. 
 }
   \item{control}{
 \code{control} argument passed to \code{optim}.
@@ -58,6 +57,9 @@ does \emph{not} include an intercept (or main effect) term.
 \item{weights}{
   an optional vector of 'prior weights' to be used in the
   fitting process. Should be \code{NULL} or a numeric vector.
+}
+  \item{nNodes}{
+number of quadrature nodes for the integration. Defaults to 20.
 }
   \item{timeVar}{
 string variable defining the time variable. By default, this is
@@ -81,6 +83,9 @@ integer for whether to provide trace information from the optim procedure
   \item{cure}{
 logical for whether to model for cure (default=FALSE)
 }
+  \item{mixture}{
+logical for whether to model for mixture cure (default=FALSE)
+}
   \item{contrasts}{
 an optional list. See the \code{contrasts.arg}
     of \code{\link{model.matrix.default}}.
@@ -102,7 +107,7 @@ logical indicating whether to use gradients in the calculation
   \code{mle2} class.
 }
 \value{
-An \code{aft-class} object that inherits from \code{mle2-class}. 
+An \code{aft_integrated-class} object that inherits from \code{mle2-class}. 
 }
 %% \references{
 %% %% ~put references to the literature/web site here ~
@@ -120,7 +125,7 @@ Mark Clements.
 \code{\link{survreg}}, \code{\link{coxph}}
 }
 \examples{
-summary(aft(Surv(rectime,censrec==1)~hormon,data=brcancer,df=4))
+summary(aft_integrated(Surv(rectime,censrec==1)~hormon,data=brcancer,df=4))
 }
 % Add one or more standard keywords, see file 'KEYWORDS' in the
 % R documentation directory.
