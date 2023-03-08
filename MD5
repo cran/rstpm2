@@ -1,4 +1,4 @@
-942146e9c8935015e2bb50d442c208a6 *DESCRIPTION
+3b2cb637476850d10ca2901d565d135c *DESCRIPTION
 4b08efefc9a5a4dbbf061c6e7950757e *NAMESPACE
 c69ae08695de3cdeb406ac2278f0547c *NEWS.md
 eeea35cae37556ba8873649a3bf4ef32 *R/aft.R
@@ -6,7 +6,7 @@ eeea35cae37556ba8873649a3bf4ef32 *R/aft.R
 c3d987f6e37e2fcd125ae5086595e5bc *R/aft_mixture.R
 dac5d4c17e1c90a8aa25541eb6c29c2f *R/gaussquad.R
 65b0ea8abd67a193e919a0ad72df715c *R/multistate.R
-b194adc5b8d7629fa6ec2c572c207e2d *R/pm2-3.R
+3dad3a91702394c3558409f5cda43167 *R/pm2-3.R
 2dcc7dc889e8627b51097a393b31e9cc *R/random.R
 d6473b7bd05189608cedf83a1e71e4b5 *R/read_gsm.R
 46cbe305acaa8388724780efbc8d144f *R/tvc.coxph.R
@@ -28,17 +28,17 @@ b560d5bddde93de19afd61b590aa31a2 *inst/auto/math.el
 9ea1e1d2fb225aa788545363a9fa1ceb *inst/competing_risks.R
 ebd3ff51fbe53867321af93867f5d42e *inst/doc/Introduction.R
 83e3f8817d1d77c15bde63264bbfbea8 *inst/doc/Introduction.Rnw
-dd3826fc97ded0d7c897424a368e6767 *inst/doc/Introduction.pdf
+5468f5808b4c34d585af71a5ed5ddd30 *inst/doc/Introduction.pdf
 1492411d0de110db58ccf3c6049ca45f *inst/doc/SimpleGuide.R
 e24e41c5b0d9294e31b5115b7ad2550a *inst/doc/SimpleGuide.Rnw
-15433f8087d93a26e78d795434d7e171 *inst/doc/SimpleGuide.pdf
+ecc039fd3566162b37f9936abd8ee839 *inst/doc/SimpleGuide.pdf
 a09d34b3142f37c22a02917825e5717c *inst/doc/equations.html
 f7760803dce557bceab034fd0bfa7370 *inst/doc/equations.org
 6f3f8b04c473040111799f6eae10a26a *inst/doc/multistate.Rnw
-da548cbb3f8a786a65ed3754ed6be012 *inst/doc/multistate.pdf
+49866655f99fa5586579dd13ccca7993 *inst/doc/multistate.pdf
 c1b8ada2ac988166c6ba01d29550d215 *inst/doc/predictnl.R
 2a60bd5f7e5250a3280bd792104d8c35 *inst/doc/predictnl.Rnw
-e9abcd353716b3345b0dff7b9f81a387 *inst/doc/predictnl.pdf
+27003f7736bfaca657231bf46cbaa412 *inst/doc/predictnl.pdf
 5dc49ecb15329a32858579ff30869067 *inst/fig1-README.md.jpg
 02aabc3edb266e6d2d2afd7eb6a236cd *inst/fig2-README.md.jpg
 d5f410444f3c24039b7e048c3eefc613 *inst/include/aft.h
@@ -84,7 +84,7 @@ a2f6ac70f9c058c657e81be3ba854a99 *man/brcancer.Rd
 13c35e79fca55fb04b03235ee81ea1e4 *man/coef.Rd
 87f6cce9452c8af7d1e81440ce12e41e *man/colon.Rd
 42ced8af8c6f7cb024ba1595a91f18ce *man/cox.tvc.Rd
-91ad7d4c568b97c7f35c9d2d95b9f717 *man/eform.Rd
+8095619fe5137f707cb767b0a197dbff *man/eform.Rd
 7d5858d037ef0339baa57512a0da8086 *man/grad.Rd
 51af82da3b7d5c6641316797a2151069 *man/gsm.Rd
 096adc2aae7ede4119e3760c73fbf23d *man/gsm.control.Rd
