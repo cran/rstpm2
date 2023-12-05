@@ -1,6 +1,6 @@
 ## Utilities
 ## copied from stats:::format.perc
-format.perc <- 
+formating.perc <- 
     function (probs, digits) 
         paste(format(100 * probs, trim = TRUE, scientific = FALSE, digits = digits), 
               "%")
@@ -266,6 +266,10 @@ setGeneric("predictnl")
     x$coefficients <- value
     x
 }
+"coef<-.mle2" <- function(x,value) {
+    x@fullcoef <- value
+    x
+}
 predictnl.default <- function(object,fun,newdata=NULL,gd=NULL,...)
   {
       if (!is.null(newdata) || "newdata" %in% names(formals(fun))) {
@@ -309,7 +313,7 @@ confint.predictnl <- function(object,parm,level=0.95,...) {
         parm <- pnames[parm]
     a <- (1 - level)/2
     a <- c(a, 1 - a)
-    pct <- format.perc(a, 3)
+    pct <- formating.perc(a, 3)
     fac <- qnorm(a)
     ci <- array(NA, dim = c(length(parm), 2L), dimnames = list(parm, 
         pct))
@@ -1596,8 +1600,8 @@ setMethod("predictnl", "stpm2",
     return(dm)
   })
 ##
-setMethod("predictnl", "aft",
-          function(object,fun,newdata=NULL,link=c("I","log","cloglog","logit"), gd=NULL, ...)
+
+predictnl.aft <- function(object,fun,newdata=NULL,link=c("I","log","cloglog","logit"), gd=NULL, ...)
   {
     link <- match.arg(link)
     linkf <- eval(parse(text=link))
@@ -1609,7 +1613,9 @@ setMethod("predictnl", "aft",
         linkf(fun(object,...))
       }
     numDeltaMethod(object,localf,newdata=newdata,gd=gd,...)
-  })
+  }
+
+setMethod("predictnl", "aft", predictnl.aft)
 
 residuals.stpm2.base <- function(object, type=c("li","gradli")) {
     type <- match.arg(type)

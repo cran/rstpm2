@@ -246,7 +246,7 @@ markov_msm <-
                    state.costs.sd=state.costs.sd,
                    transition.costs.sd=transition.costs.sd,
                    coefficients=coef(x),
-                   call=call),
+                   call=call, x=x),
               class="markov_msm")
 }
 
@@ -515,9 +515,9 @@ standardise.markov_msm <- function(x,
     x
 }
 vcov.survPen <- function(object) object$Vp
-"coef<-.survPen" <- function(this,value) {
-    this$coefficients <- value
-    this
+"coef<-.survPen" <- function(x,value) {
+    x$coefficients <- value
+    x
 }
 survPenWrap <- function(object) {
     stopifnot(inherits(object, "survPen"))
@@ -668,7 +668,7 @@ predict.aftreg <- function (object, type = c("haz", "cumhaz", "density", "surv",
     }
     if (ncov) {
         x <- model.matrix(object, newframe)[,-1,drop=FALSE] # is the intercept always first?
-        x <- sweep(x, 2, object$means)
+        ## x <- sweep(x, 2, object$means) # no longer sweep:)
         param.scale <- if (object$param=="lifeAcc") -1 else 1
         lambda <- lambda *
             exp(param.scale*(x %mv% object$coefficients[1:ncov]))
@@ -1668,4 +1668,21 @@ as.data.frame.markov_sde <- function(x, row.names=NULL, optional=NULL, ci=TRUE,
     out$.id. <- NULL
     if(!is.null(row.names)) rownames(out) <- row.names
     out
+}
+
+## Parametric bootstrap
+pboot = function(object, m, parallel=FALSE, mc.cores=parallel::detectCores(), ...) {
+    ## do this once
+    newx = object$x
+    coefs <- lapply(object$x, function(xi) coef(xi)) # note this trick!
+    vcovs <- lapply(object$x, function(xi) vcov(xi)) # note this trick!
+    ## vcov = lapply(object$x, vcov) # fails:(
+    ## do the following m times
+    parallel::mclapply(1:m , function(i) {
+        ## update the coefs
+        for (j in 1:length(newx))
+            coef(newx[[j]]) = mvtnorm::rmvnorm(1,coefs[[j]],vcovs[[j]])
+        ## update the object
+        update(object,x=newx)
+    }, mc.cores=mc.cores)
 }
