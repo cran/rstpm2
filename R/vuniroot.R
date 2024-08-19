@@ -108,13 +108,13 @@ vuniroot <-
                  "did not succeed extending the interval endpoints for f(lower) * f(upper) <= 0"
              else "f() values at end points not of opposite sign")
     if (check.conv) {
-        val <- tryCatch(.Call("vunirootRcpp", fun, lower, upper, f.lower, f.upper, maxiter, tol, PACKAGE="rstpm2"),
+        val <- tryCatch(vunirootRcpp(fun, lower, upper, f.lower, f.upper, maxiter, tol),
                         warning = function(w) w)
         if (inherits(val, "warning")) 
             stop("convergence problem in zero finding: ", conditionMessage(val))
     }
     else {
-        val <- .Call("vunirootRcpp", fun, lower, upper, f.lower, f.upper, as.integer(maxiter), tol, PACKAGE="rstpm2")
+        val <- vunirootRcpp(fun, lower, upper, f.lower, f.upper, as.integer(maxiter), tol)
     }
     iter <- as.integer(val[[2L]])
     if (any(iter < 0)) {
@@ -131,19 +131,20 @@ vuniroot <-
          init.it = it, estim.prec = val[[3L]])
 }
 
+
 voptimize <- function (f, interval, ...,
                        lower=pmin(interval[,1], interval[,2]),
                        upper=pmax(interval[,1], interval[,2]),
                        maximum = FALSE, tol = .Machine$double.eps^0.25) 
 {
     if (maximum) {
-        val <- .Call("voptimizeRcpp", function(arg) -f(arg, ...), 
-                     lower, upper, tol, PACKAGE="rstpm2")
+        val <- voptimizeRcpp(function(arg) -f(arg, ...), 
+                     lower, upper, tol)
         list(maximum = val, objective = f(val, ...))
     }
     else {
-        val <- .Call("voptimizeRcpp", function(arg) f(arg, ...), 
-            lower, upper, tol, PACKAGE="rstpm2")
+        val <- voptimizeRcpp(function(arg) f(arg, ...), 
+            lower, upper, tol)
         list(minimum = val, objective = f(val, ...))
     }
 }

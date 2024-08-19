@@ -18,6 +18,104 @@
 ##   require(bbmle)
 ## }
 
+model.matrix(~factor(x)-1, data.frame(x=1:2))
+
+library(rstpm2)
+aft(Surv(rectime,censrec==1)~hormon,data=rstpm2::brcancer,df=3) # ok
+aft(Surv(rectime,censrec==1)~factor(hormon),data=rstpm2::brcancer,df=3) # ok
+aft(Surv(rectime,censrec==1)~hormon+factor(hormon),data=rstpm2::brcancer,df=3) # ok
+aft(Surv(rectime,censrec==1)~factor(hormon),data=rstpm2::brcancer,df=3,tvc=list(hormon=2)) # ok (drops second spline term)
+aft(Surv(rectime,censrec==1)~hormon,data=rstpm2::brcancer,df=3,tvc=list(hormon=2)) # ok (drops hormon)
+aft(Surv(rectime,censrec==1)~1,data=rstpm2::brcancer,df=3,tvc=list(hormon=2)) # ok
+
+## marginaleffects
+library(rstpm2)
+library(marginaleffects)
+test1 <- stpm2(Surv(rectime, censrec == 1) ~ hormon * x3, data = brcancer, df = 3)
+nd <- data.frame(rectime=1000, hormon=c(0,1), x3=50)
+pred1 <- predict(m, type = "surv", newdata = nd)
+pred2 <- predictions(m, type = "surv", newdata = nd)
+all(pred1 == pred2$estimate)
+
+pred3 <- predict(m, newdata=nd, type="meansurv")
+pred4 <- avg_predictions(m, type="surv", newdata=nd, by="x3")
+pred3 == pred4$estimate
+
+## Bug fix: aft with factor
+library(rstpm2)
+summary(fit1 <- aft(Surv(rectime,censrec==1)~hormon,data=rstpm2::brcancer,df=4))
+summary(fit2 <- aft(Surv(rectime,censrec==1)~factor(hormon),data=rstpm2::brcancer,df=4))
+vcov(fit1) |> cov2cor() |> "rownames<-"(NULL) |> "colnames<-"(NULL)
+vcov(fit2) |> cov2cor() |> "rownames<-"(NULL) |> "colnames<-"(NULL)
+
+## Bug report: aft with left truncation
+library(rstpm2)
+brcancer$start <- 0
+fit <- aft(Surv(start, rectime,censrec==1)~hormon,data=brcancer,df=4) # now okay:)
+brcancer$start <- 1
+fit <- aft(Surv(start, rectime,censrec==1)~hormon,data=brcancer,df=4) # now okay:)
+
+length(rstpm2:::lhs(Surv(start, rectime, censrec == 1) ~ hormon))
+
+## test for predict(..., type="lpmatrixD")
+library(rstpm2)
+fit = aft(Surv(rectime,censrec==1)~hormon,data=brcancer)
+plot(fit, newdata=data.frame(hormon=1))
+lines(fit, newdata=data.frame(hormon=0), lty=2)
+
+
+## test for predict(..., type="lpmatrixD")
+library(rstpm2)
+fit = stpm2(Surv(rectime,censrec==1)~hormon,data=brcancer)
+m = predict(fit, newdata=data.frame(hormon=1), grid=TRUE, type="lpmatrix")
+m2 = predict(fit, newdata=data.frame(hormon=1), grid=TRUE, type="lpmatrixD")
+
+## check that offset works
+library(rstpm2)
+stpm2(Surv(rectime,censrec==1)~hormon,data=brcancer)
+stpm2(Surv(rectime,censrec==1)~hormon+offset(hormon),data=brcancer)
+
+library(survival)
+library(rstpm2)
+brcancer = transform(rstpm2::brcancer, id=1:(nrow(brcancer)/2))
+survreg(Surv(rectime,censrec==1)~hormon+cluster(id),data=brcancer)
+survreg(Surv(rectime,censrec==1)~hormon,data=brcancer)
+
+
+## Andreas's bug report
+library(rstpm2)
+two_states <- function(model, ...) {
+  transmat = matrix(c(NA,1,NA,NA),2,2,byrow=TRUE)
+  rownames(transmat) <- colnames(transmat) <- c("Initial","Final")
+  rstpm2::markov_msm(list(model), ..., trans = transmat)
+}
+## ERROR
+death = gsm(Surv(time,status)~factor(rx), 
+            data=survival::colon, subset=(etype==2), df=3)
+ts = two_states(death, newdata=data.frame(rx = levels(survival::colon$rx)), 
+                t = seq(0,2500, length = 51))
+sts <- standardise(ts)
+as.data.frame(sts)
+##
+## OK
+death = gsm(Surv(time,status)~factor(rx) + age, 
+            data=survival::colon, subset=(etype==2), df=3)
+ts = two_states(death, newdata=data.frame(rx="Obs",
+                                          age = c(65, 70, 75)), 
+                t = seq(0,2500, length = 51))
+sts <- standardise(ts)
+as.data.frame(sts)
+
+
+## predictions
+library(rstpm2)
+fit <- stpm2(Surv(rectime,censrec==1)~hormon,data=brcancer, df=3, tvc=list(hormon=2))
+plot(fit, type="hr", newdata=data.frame(hormon=0), var="hormon")
+predict(fit, newdata=data.frame(hormon=0, rectime=c(250,500,1000)), type="hr", var="hormon", full=TRUE, se.fit=TRUE)
+##
+fit0 <- stpm2(Surv(rectime,censrec==1)~hormon,data=brcancer, df=3)
+anova(fit0,fit)
+
 Y = 10
 T = 1000
 poisson.test(Y,T)
@@ -30,6 +128,13 @@ quantile(Ys, c(0.025,0.975))
 rates = exp(rnorm(1e5, log(Y), 1/sqrt(Y)))/T
 quantile(rates, c(0.025,0.975))
 
+## left truncated
+library(rstpm2)
+brcancer2 <- transform(brcancer,
+                       startTime=ifelse(hormon==0,rectime/2,0))
+##debug(stpm2)
+summary(fit <- stpm2(Surv(startTime,rectime,censrec==1)~hormon,data=brcancer2, df=3))
+tmp=predict(fit, newdata=data.frame(hormon=0), type="hazard", grid=TRUE, full=TRUE, se.fit=TRUE)
 
 
 library(rstpm2)
@@ -3444,7 +3549,8 @@ hiv2 <- transform(hiv,
                          ifelse(Event==0,NA,
                                 Right)))
 library(rstpm2)
-summary(stpm2(Surv(Left,Right,Event,type="interval")~Stage, data=hiv2, df=2))[2]
+summary(stpm2(Surv(Left,Right,Event,type="interval")~Stage, data=hiv2, df=2))
+summary(stpm2(Surv(Left,Right,Event,type="interval")~Stage, data=hiv2, df=1))
 survreg(Surv(Left, Right, Event, type = "interval")~Stage, data=hiv2,dist="exponential")
 library(rms)
 psm(Surv(Left, Right, Event, type = "interval")~Stage, data=hiv2,dist="exponential")
