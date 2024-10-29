@@ -1,3 +1,34 @@
+assume(x>0)$
+gamma : integrate((1-v(tau))*mu(tau)*delta(x,tau)*exp(-integrate(beta(u,tau)-alpha(u),u,tau,x)), tau, 0, x);
+diff(gamma,x);
+
+nu : integrate((1-v(tau))*mu(tau)*exp(-integrate(beta(u,tau)-alpha(u),u,tau,x)), tau, 0, x);
+diff(nu,x);
+
+diff(nu,x) - (nu*alpha(x) + mu(x)*(1-v(x)));d
+iff(nu,x) - (nu*alpha(x) + mu(x)*(1-v(x))), expand, ratsimp;
+diff(nu,x) - (nu*alpha(x) + mu(x)*(1-v(x))), ratsimp;
+
+subst(x=x+Delta, nu) - nu;
+
+/* what about doing this using Kolmogorov's forward integro-differential equation? */
+
+assume(x>0)$
+assume(tau>0)$
+healthy : exp(-integrate(mu(u)+alpha(u),u,0,x));
+illness : integrate(exp(-integrate(mu(u)+alpha(u),u,0,tau))*mu(tau)*exp(-integrate(phi(u,tau),u,tau,x)), tau, 0, x);
+prev : illness/(illness + healthy);
+prevOdds : illness/healthy;
+mortality : integrate(exp(-integrate(mu(u)+alpha(u),u,0,tau))*mu(tau)*exp(-integrate(phi(u,tau),u,tau,x))*(phi(x,tau)-alpha(x)), tau, 0, x)/(healthy+illness);
+
+diff(log(-log(theta)), theta);
+
+
+
+
+diff(gamma,x);
+
+
 fpprec : 33;
 /*       1234567891123456789212345678931234567 */
 xi :  [0.995657163025808080735527280689003b0,

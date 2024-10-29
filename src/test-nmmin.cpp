@@ -478,9 +478,8 @@ namespace rstpm2 {
   };
   class NelderMead2 : public NelderMead {
   public:
-    NumericMatrix calc_hessian(optimfn fn, void * ex, int debug) {
+    NumericMatrix calc_hessian(optimfn fn, void * ex) {
       if (parscale.size()==0) REprintf("parscale is not defined for NelderMead2::calc_hessian.");
-      if (debug>1) Rprintf("In NelderMead2->calc_hessian()...\n");
       int n = coef.size();
       NumericMatrix hess(n,n);
       double tmpi,tmpj,f1,f0,fm1,hi,hj,fij,fimj,fmij,fmimj;
@@ -517,14 +516,13 @@ namespace rstpm2 {
 	  }
 	}
       }
-      if (debug>1) Rprint(hess);
       return hess;
     }
     vec parscale;
   };
   class Nlm2 : public Nlm {
   public:
-    NumericMatrix calc_hessian(fcn_p fn, void * ex, int debug = 0) {
+    NumericMatrix calc_hessian(fcn_p fn, void * ex) {
       if (parscale.size()==0) REprintf("parscale is not defined for Nlm2::calc_hessian.");
       int n = coef.size();
       NumericMatrix hess(n,n);
@@ -611,7 +609,7 @@ namespace rstpm2 {
 	if (!satisfied) this->kappa *= 2.0;				\
       } while ((!satisfied) && this->kappa < this->maxkappa);		\
       if (this->bfgs.trace > 1) Rprintf("Calculating hessian...\n");	\
-      nm.hessian = nm.calc_hessian(&optimfunction<This>, (void *) this, this->bfgs.trace); \
+      nm.hessian = nm.calc_hessian(&optimfunction<This>, (void *) this); \
       this->bfgs.coef = nm.coef;					\
       this->bfgs.hessian = nm.hessian;					\
     }									\
