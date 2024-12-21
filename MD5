@@ -1,4 +1,4 @@
-9042734886eed5b157adbf536847b52c *DESCRIPTION
+370af5c624e2ea0d0a29c0cac3c22cf1 *DESCRIPTION
 184664dc231d400505d895926ee0c2b7 *NAMESPACE
 c69ae08695de3cdeb406ac2278f0547c *NEWS.md
 7a3e10bd093a3794306660cf2fd04ea1 *R/RcppExports.R
@@ -13,10 +13,10 @@ c25903f251c81743ed181e7fd94547ad *R/read_gsm.R
 0f415be5691316ba6ce22b17d496431f *R/zzz.R
 bf1e7b6285e4f73dfa993c99d05a9029 *README.md
 75880e172bf596355022239b9711851e *build/vignette.rds
-8bdf762dc2ca2044f04dba37bef92a8c *data/brcancer.rda
-b229556b6ba0687cf0bdd24c57f36b48 *data/colon.rda
-a3e2d667791996e0c9356735415f65e5 *data/legendre.quadrature.rule.200.rda
-3957834d97af33457d2dd68fef6c71ff *data/popmort.rda
+cc6c0e625f21d38275d9419244c440a6 *data/brcancer.rda
+0c0b7fcb16d8b230bbc8a497dd9be82a *data/colon.rda
+1fd6aad0522e7d4c48c1f048b7291889 *data/legendre.quadrature.rule.200.rda
+db99ccec1b1a0fc1fb5bff5c0a0a369e *data/popmort.rda
 81e24a15e9f72a17a41342e29a2cf041 *inst/CITATION
 320cfbc312296f2ffd9714322d19d9b2 *inst/Rcpp-tests.R
 804cec5211cd5c5df97a5d8ae0c48cc4 *inst/Thumbs.db
@@ -126,7 +126,7 @@ dbedfc641126921e0e48639e84fee06b *src/RcppExports.cpp
 a1f94e3c1ad9b4087ef1a282851f0135 *src/package_init.c
 0f5fde65b894236a380e912d2614ab40 *src/pluginEstimate2.cpp
 23ce836f3c4632d7ccd0db67f9aece43 *src/splines.cpp
-a616946c3edacc7ce77151a501d4a354 *src/test-nmmin.cpp
+43d3035ff93bf80562c9714c3eb048cd *src/test-nmmin.cpp
 e3201bbc8bc6309e2f5c80489824e62e *src/utils.cpp
 69912ad3945f097e171bb9f990443b4c *src/vintegrate.cpp
 6cc25dd9878af957adbaa8976b92de76 *src/vuniroot.cpp

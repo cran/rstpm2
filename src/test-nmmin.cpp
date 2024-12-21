@@ -93,14 +93,14 @@ namespace rstpm2 {
     vec out(x.size());
     double const *xi = x.begin();
     for(double &o : out)
-      o = R::pnorm5(*xi++, 0, 1, true, false);
+      o = R::pnorm(*xi++, 0, 1, true, false);
     return out;
   }
   vec pnorm01_log(vec const &x) {
     vec out(x.size());
     double const *xi = x.begin();
     for(double &o : out)
-      o = R::pnorm5(*xi++, 0, 1, true, true);
+      o = R::pnorm(*xi++, 0, 1, true, true);
     return out;
   }
   /* \frac \partial{\partial x} \log \Phi(x) = \frac{\phi(x)}{\Phi(x)} */
@@ -110,12 +110,12 @@ namespace rstpm2 {
     for(double &o : out){
       double const xv = *xi++; 
       if(xv > -10){
-        double const dv     = R::dnorm4(xv, 0, 1    , 0L), 
-                     pv     = R::pnorm5(xv, 0, 1, 1L, 0L);
+        double const dv     = R::dnorm(xv, 0, 1    , 0L), 
+                     pv     = R::pnorm(xv, 0, 1, 1L, 0L);
         o = dv / pv;
       } else {
-        double const log_dv = R::dnorm4(xv, 0, 1    , 1L), 
-                     log_pv = R::pnorm5(xv, 0, 1, 1L, 1L);
+        double const log_dv = R::dnorm(xv, 0, 1    , 1L), 
+                     log_pv = R::pnorm(xv, 0, 1, 1L, 1L);
         o = std::exp(log_dv - log_pv);
       }
     }
@@ -125,14 +125,14 @@ namespace rstpm2 {
     vec out(x.size());
     double const *xi = x.begin();
     for(double &o : out)
-      o = R::qnorm5(*xi++, 0, 1, true, false);
+      o = R::qnorm(*xi++, 0, 1, true, false);
     return out;
   }
   vec dnorm01(vec const &x) {
     vec out(x.size());
     double const *xi = x.begin();
     for(double &o : out)
-      o = R::dnorm4(*xi++, 0, 1, false);
+      o = R::dnorm(*xi++, 0, 1, false);
     return out;
   }
   // we could use templates for the following...
