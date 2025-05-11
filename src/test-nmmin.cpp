@@ -420,7 +420,7 @@ namespace rstpm2 {
       Rprintf("beta="); Rprint(coef);
       Rprintf("objective=%.10g\n",value);
     };
-    // R_CheckUserInterrupt();  /* be polite -- did the user hit ctrl-C? */
+    R_CheckUserInterrupt();  /* be polite -- did the user hit ctrl-C? */
     return value;
   }
   template<class T>
@@ -775,9 +775,9 @@ namespace rstpm2 {
 	if (delayed && !eta0.empty()) {
 	  li_constraint s0 = li_left_truncated(eta0+offset(which0));
 	  s.constraint += s0.constraint;
-	  if (bfgs.trace > 0) {
-	    Rprint(which0);
-	  }
+	  // if (bfgs.trace > 0) {
+	  //   Rprint(which0);
+	  // }
 	  s.li(which0) += s0.li;
 	}
 	return s;
