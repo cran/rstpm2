@@ -119,7 +119,8 @@ function (object, newx, ...)
 Shat <- function(obj)
   {
     ## predicted survival for individuals (adjusted for covariates)
-    newobj = survfit(obj,se.fit=FALSE)
+    ## Be wary: suppressWarnings() because survfit.coxph does not like interactions
+    newobj = suppressWarnings(survfit(obj,se.fit=FALSE))
     surv = newobj$surv
     rr = try(predict(obj,type="risk"),silent=TRUE)
     if (inherits(rr,"try-error"))
@@ -273,7 +274,7 @@ numDeltaMethod <- function(object, fun, gd=NULL,
     UseMethod("coef<-")
 predictnl <- function (object, ...) 
   UseMethod("predictnl")
-setGeneric("predictnl")
+setGeneric("predictnl", function(object, ...) standardGeneric("predictnl"))
 "coef<-.default" <- function(x,value) {
     x$coefficients <- value
     x
@@ -283,8 +284,9 @@ setGeneric("predictnl")
     x
 }
 predictnl.default <- function(object,fun,newdata=NULL,gd=NULL,...)
-  {
-      if (!is.null(newdata) || "newdata" %in% names(formals(fun))) {
+{
+      stopifnot(is.function(fun))
+      if (!is.null(newdata) || "newdata" %in% formalArgs(fun)) {
           local1 <- function(coef,newdata,...)
               {
                   coef(object) <- coef
@@ -334,13 +336,14 @@ confint.predictnl <- function(object,parm,level=0.95,...) {
 predictnl.lm <- 
 function (object, fun, newdata = NULL, ...) 
 {
-    if (is.null(newdata) && "newdata" %in% names(formals(fun))) {
+    stopifnot(is.function(fun))
+    if (is.null(newdata) && "newdata" %in% formalArgs(fun)) {
         stopifnot(!is.null(object$data))
         newdata <- object$data
     }
     predictnl.default(object, fun, newdata, ...)
 }
-## setMethod("predictnl", "mle", function(object,fun,gd=NULL,...)
+## predictnl.mle <- function(object,fun,gd=NULL,...)
 ##   {
 ##     localf <- function(coef,...)
 ##       {
@@ -348,7 +351,7 @@ function (object, fun, newdata = NULL, ...)
 ##         fun(object,...)
 ##       }
 ##     numDeltaMethod(object,localf,gd=gd,...)
-##   })
+##   }
 predict.formula <- function(object,data,newdata,na.action,type="model.matrix",
                             ...) 
 {
@@ -1521,10 +1524,29 @@ pstpm2 <- function(formula, data, weights=NULL, subset=NULL, coxph.strata=NULL, 
     out
 }
 
-setMethod("update", "stpm2", function(object, ...) {
-    object@call = object@Call
-    update.default(object, ...)
-})
+## setGeneric("update", function(object, ...) standardGeneric("update"))
+setMethod("update", signature(object="stpm2"), 
+    function (object, formula., evaluate = TRUE, ...) 
+    {
+        call <- object@Call
+        extras <- match.call(expand.dots = FALSE)$...
+        if (!missing(formula.)) 
+            call$formula <- update.formula(call$formula, 
+                formula.)
+        if (length(extras)) {
+            existing <- !is.na(match(names(extras), names(call)))
+            for (a in names(extras)[existing]) call[[a]] <- extras[[a]]
+            if (any(!existing)) {
+                call <- c(as.list(call), extras[!existing])
+                call <- as.call(call)
+            }
+        }
+        if (evaluate) 
+            eval(call, parent.frame())
+        else call
+    })
+
+
 setMethod("show", "stpm2",
           function(object) {
               object@call.orig <- object@Call
@@ -1609,7 +1631,6 @@ setMethod("predictnl", "stpm2",
     ## return(out)
     return(dm)
   })
-##
 
 predictnl.aft <- function(object,fun,newdata=NULL,link=c("I","log","cloglog","logit"), gd=NULL, ...)
   {
@@ -2525,8 +2546,8 @@ derivativeDesign <-
 function (functn, lower = -1, upper = 1, rule = NULL,
     ...) 
 {
-    pred <- if (length(list(...)) && length(formals(functn)) > 
-              1) 
+    stopifnot(is.function(functn))
+    pred <- if (length(list(...)) && length(formalArgs(functn)) > 1) 
         function(x) functn(x, ...)
     else functn
     if (is.null(rule))
@@ -2587,8 +2608,6 @@ smootherDesign <- function(gamobj,data,parameters = NULL) {
 }
 ## TODO: If we transform a smoother (e.g. log(time)), we can use information on
 ## (i) the variable name, (ii) the transform and (iii) the inverse transform.
-
-
 
 ## penalised stpm2
 setOldClass("gam")
@@ -2890,6 +2909,27 @@ lines.pstpm2 <- function(x,newdata=NULL,type="surv",
                               line.col=col, ci.col=ci.col, lty=lty, add=TRUE,
                               ci=ci, rug=rug, var=var, exposed=exposed, times=times, ...)
 setMethod("lines", signature(x="pstpm2"), lines.pstpm2)
+
+setMethod("update", signature(object="pstpm2"),
+    function (object, formula., evaluate = TRUE, ...) 
+    {
+        call <- object@Call
+        extras <- match.call(expand.dots = FALSE)$...
+        if (!missing(formula.)) 
+            call$formula <- update.formula(call$formula, 
+                formula.)
+        if (length(extras)) {
+            existing <- !is.na(match(names(extras), names(call)))
+            for (a in names(extras)[existing]) call[[a]] <- extras[[a]]
+            if (any(!existing)) {
+                call <- c(as.list(call), extras[!existing])
+                call <- as.call(call)
+            }
+        }
+        if (evaluate) 
+            eval(call, parent.frame())
+        else call
+    })
 
 ## sandwich variance estimator (from the sandwich package)
 
